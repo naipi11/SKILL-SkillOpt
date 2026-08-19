@@ -1,64 +1,72 @@
-# SkillOpt Trainer
+# Agent-SkillOpt
 
-用 DeepSeek API 一键训练 AI Agent 的 skill 文档——像训练神经网络一样优化 prompt。
+面向中文使用者的 Microsoft SkillOpt 集成、诊断、可复现实验与证据报告工具包。
+
+Agent-SkillOpt 是一个轻量集成层：它读取本地 YAML 配置，检查用户自己管理的
+SkillOpt 检出，渲染安全的上游调用，并保存脱敏的运行证据。它不 fork 上游优化
+核心，不会修改上游文件，也不会默认访问网络、下载数据或消耗模型 API 额度。
+
+## 当前目标
+
+- P0：安装、配置、doctor 与不覆盖已有文件的初始化。
+- P1：无网络 dry-run、显式网络门禁与脱敏 manifest。
+- P2：不伪造指标的报告、baseline/candidate/holdout 证据契约。
+
+通用 OpenAI-compatible 训练后端以 Microsoft SkillOpt 提交
+9c776fcb51ae681c046d6f619b55e5f337d4f900 为首个兼容基线。
+PyPI v0.2.0 早于该后端，不能用于此兼容训练路径。
 
 ## 安装
 
-```bash
-# Hermes
-git clone https://github.com/naipi11/SKILL-SkillOpt.git ~/.hermes/skills/skillopt-trainer
+需要 Python 3.10 或更高版本。下面的安装步骤只解析 Python 依赖；不会连接模型
+提供商，也不会读取或输出任何 API 密钥。
 
-# Claude Code
-git clone https://github.com/naipi11/SKILL-SkillOpt.git ~/.claude/skills/skillopt-trainer
+    python -m pip install -e ".[dev]"
 
-# Codex (OpenAI)
-git clone https://github.com/naipi11/SKILL-SkillOpt.git ~/.codex/skills/skillopt-trainer
+## 默认无网络工作流
 
-# OpenClaw
-git clone https://github.com/naipi11/SKILL-SkillOpt.git ~/.openclaw/skills/skillopt-trainer
+首先查看命令和创建项目配置：
 
-# OpenCode
-git clone https://github.com/naipi11/SKILL-SkillOpt.git ~/.opencode/skills/skillopt-trainer
-```
+    agent-skillopt --help
+    agent-skillopt init --path .
 
-其他 Agent：clone 后把 `SKILL.md` 放到 agent 的 skill/prompt 目录即可。
+在准备好本地 SkillOpt 检出和数据目录后，仅做本地检查与命令渲染：
 
-## 快速开始
+    agent-skillopt doctor --config agent-skillopt.yaml
+    agent-skillopt run --config agent-skillopt.yaml --dry-run
 
-```bash
-# 1. 安装 SkillOpt
-git clone https://github.com/microsoft/SkillOpt.git && cd SkillOpt
-python3 -m venv venv && source venv/bin/activate && pip install -e .
+dry-run 不启动子进程、不发起网络请求，也不要求已设置密钥。它只显示经过脱敏的
+上游命令并提示缺失的非公开前置条件。
 
-# 2. 配置 DeepSeek
-export OPENAI_API_KEY=***   export OPENAI_BASE_URL="https://api.deepseek.com"
+## 真正运行前的门禁
 
-# 3. 打补丁（让 SkillOpt 支持非 Azure API）
-#    编辑 skillopt/model/azure_openai.py，_make_client() endpoint 为空时回退到 OpenAI()
+只有在你已单独批准以下范围后，才可以使用带有 allow-network 的运行命令：
 
-# 4. 下载 + 转换数据
-curl -L -o data/train.zip "https://huggingface.co/datasets/kyunghyuncho/search_qa/resolve/main/data/train_test_val/train.zip"
-python scripts/convert_searchqa.py data/train.zip data/split 500 "2:1:7"
+1. 具体模型、预算与并发。
+2. 将要发往提供商的数据、轨迹或样本范围。
+3. 提供商的数据处理、保留与计费政策。
 
-# 5. 训练
-python scripts/train.py --config configs/searchqa/deepseek.yaml --num_epochs 3
-```
+运行时仅使用配置中声明的环境变量名（例如 DEEPSEEK_API_KEY）。密钥值不得写入
+YAML、命令行、日志、测试、manifest 或 Git 历史。
 
-产出 `outputs/<run>/best_skill.md`——可部署到任意 agent。
+## 上游与数据
 
-## 原理
+请自行维护 Microsoft SkillOpt 本地检出。Agent-SkillOpt 只检查其路径、版本和所需
+文件，绝不自动 clone、patch 或下载。SearchQA 数据准备应调用上游的材料化工具；
+本项目不复制基准数据。
 
-```
-初始 skill → Target 执行任务 → 失败轨迹 → Optimizer 分析 → 写编辑 → Gate 验证 → 迭代 → 最优 skill
-```
+## 兼容性与安全
 
-不碰模型权重，只优化自然语言。DeepSeek V4 Pro 做 Optimizer，V4 Flash 做 Target。
+- 已验证和待验证环境见 docs/compatibility.md。
+- 数据外发、密钥与漏洞处理见 docs/security.md。
+- 实验指标与授权规则见 docs/evaluation.md 和 docs/experiment-checklist.md。
+- SKILL.md 只声明已验证的操作契约，不声称可在所有 Agent 宿主中完全一致运行。
 
-## 文件
+## 开发验证
 
-| 文件 | 说明 |
-|------|------|
-| `SKILL.md` | Agent 交互式完整指南（加载后按 7 步流程引导用户） |
-| `scripts/train_quick.sh` | 一键训练脚本（Linux / macOS） |
-| `scripts/train_quick.py` | 一键训练脚本（Windows / macOS / Linux） |
-| `README.md` | 项目说明 |
+    python -m compileall src
+    python -m pytest tests -v
+    python -m ruff check src tests
+    bash -n scripts/validate.sh
+
+许可证：MIT。Microsoft SkillOpt 的归属与边界见 NOTICE。

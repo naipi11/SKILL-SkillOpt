@@ -1,0 +1,21 @@
+{
+  "baseline": {
+    "score": 0.62,
+    "samples": 100,
+    "cost_usd": null
+  },
+  "candidate": {
+    "score": 0.68,
+    "samples": 100,
+    "cost_usd": null
+  },
+  "holdout": {
+    "score": 0.65,
+    "samples": 120,
+    "cost_usd": null
+  },
+  "upstream_summary": {
+    "source": "synthetic-example",
+    "note": "All values are illustrative only; they are not a performance claim."
+  }
+}

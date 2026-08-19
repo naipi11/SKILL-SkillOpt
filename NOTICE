@@ -1,0 +1,9 @@
+Agent-SkillOpt is an independent integration layer. It is not affiliated with,
+endorsed by, or a fork of Microsoft SkillOpt.
+
+The project is designed to work with a user-controlled checkout of Microsoft
+SkillOpt. Microsoft SkillOpt and its source code remain subject to their own
+repository license, notices, and terms. Agent-SkillOpt does not include,
+redistribute, or modify the upstream optimisation core.
+
+Upstream project: https://github.com/microsoft/SkillOpt
