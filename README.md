@@ -1,4 +1,18 @@
-# Agent-SkillOpt
+<div align="center">
+  <img src="docs/assets/agent-skillopt-hero.gif" alt="Agent-SkillOpt：安全、可复现、证据优先的技能优化流程" width="100%">
+</div>
+
+<h1 align="center">Agent-SkillOpt</h1>
+
+<p align="center">
+  安全地连接 Agent、技能优化与可复现实验证据
+</p>
+
+<p align="center">
+  <a href="https://github.com/naipi11/Agent-SkillOpt/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/naipi11/Agent-SkillOpt/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&amp;logoColor=white">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-2ea44f.svg"></a>
+</p>
 
 面向中文使用者的 Microsoft SkillOpt 集成、诊断、可复现实验与证据报告工具包。
 
