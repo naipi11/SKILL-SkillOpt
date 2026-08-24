@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 
 from agent_skillopt.errors import SpecError
@@ -118,7 +118,7 @@ def _parse_resources(value: object) -> tuple[ResourceSpec, ...]:
         kind = resource["kind"]
         filename = resource["filename"]
         content = resource["content"]
-        if kind not in _RESOURCE_KINDS:
+        if not isinstance(kind, str) or kind not in _RESOURCE_KINDS:
             raise SpecError("resource kind 必须是 reference、script 或 asset。")
         if not isinstance(filename, str) or not _is_safe_resource_filename(filename):
             raise SpecError("resource filename 不能是绝对路径或包含路径遍历。")
@@ -134,5 +134,8 @@ def _parse_resources(value: object) -> tuple[ResourceSpec, ...]:
 def _is_safe_resource_filename(value: str) -> bool:
     if "\\" in value or not value or value.startswith("/"):
         return False
-    path = PurePosixPath(value)
-    return path != PurePosixPath(".") and ".." not in path.parts
+    posix_path = PurePosixPath(value)
+    windows_path = PureWindowsPath(value)
+    if posix_path.is_absolute() or windows_path.is_absolute():
+        return False
+    return posix_path != PurePosixPath(".") and ".." not in posix_path.parts

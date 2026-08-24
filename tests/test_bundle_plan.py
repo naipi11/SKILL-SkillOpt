@@ -51,3 +51,44 @@ def test_preview_rejects_an_unnormalized_skill_name(tmp_path: Path):
                 }
             )
         )
+
+
+def test_spec_rejects_a_non_string_resource_kind(tmp_path: Path):
+    with pytest.raises(SpecError):
+        SkillSpec.from_json(
+            json.dumps(
+                {
+                    "name": "release-notes",
+                    "description": "A valid sentence.",
+                    "body": "A valid body.",
+                    "output_directory": str(tmp_path / "release-notes"),
+                    "resources": [
+                        {"kind": [], "filename": "notes.txt", "content": "Reference material."}
+                    ],
+                }
+            )
+        )
+
+
+@pytest.mark.parametrize("filename", ["/absolute.txt", "C:/absolute.txt", r"C:\\absolute.txt"])
+def test_spec_rejects_posix_and_windows_absolute_resource_filenames(
+    tmp_path: Path, filename: str
+):
+    with pytest.raises(SpecError):
+        SkillSpec.from_json(
+            json.dumps(
+                {
+                    "name": "release-notes",
+                    "description": "A valid sentence.",
+                    "body": "A valid body.",
+                    "output_directory": str(tmp_path / "release-notes"),
+                    "resources": [
+                        {
+                            "kind": "reference",
+                            "filename": filename,
+                            "content": "Reference material.",
+                        }
+                    ],
+                }
+            )
+        )
