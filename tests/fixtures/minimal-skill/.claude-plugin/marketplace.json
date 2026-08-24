@@ -1,0 +1,4 @@
+{
+  "name": "minimal-skill",
+  "plugins": [{"name": "minimal-skill", "source": "./"}]
+}

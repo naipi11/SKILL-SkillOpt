@@ -20,21 +20,10 @@ from agent_skillopt.errors import (
     WriteConflictError,
 )
 from agent_skillopt.models import BundlePlan, PlannedFile, ResourceSpec, SkillSpec
+from agent_skillopt.validation import assert_valid_bundle
 
 _RESOURCE_DIRECTORIES = {"reference": "references", "script": "scripts", "asset": "assets"}
-_VALIDATOR_CONTENT = '''"""Offline validator entry point reserved for the generated bundle."""
-
-from __future__ import annotations
-
-
-def main() -> int:
-    """Return success until full offline validation is added in a later task."""
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-'''
+_PORTABLE_VALIDATOR_PATH = Path(__file__).resolve().parents[2] / "tests" / "validate_bundle.py"
 
 
 def build_plan(spec: SkillSpec) -> BundlePlan:
@@ -60,8 +49,7 @@ def build_plan(spec: SkillSpec) -> BundlePlan:
         ),
         PlannedFile(PurePosixPath("README.md"), _readme_content(spec), "package README"),
         PlannedFile(
-            PurePosixPath("tests/validate_bundle.py"),
-            _VALIDATOR_CONTENT,
+            PurePosixPath("tests/validate_bundle.py"), _portable_validator_content(),
             "offline bundle validator",
         ),
     ]
@@ -105,6 +93,7 @@ def apply_plan(plan: BundlePlan, confirmation_token: str) -> tuple[Path, ...]:
         staging_directory = staging_directory.resolve()
         _write_staged_files(staging_directory, plan.files)
         _assert_staged_file_presence(staging_directory, plan.files)
+        assert_valid_bundle(staging_directory)
         _publish_staging_no_clobber(staging_directory, final_target)
     except BaseException:
         if staging_directory is not None:
@@ -122,6 +111,14 @@ def _planned_json(path: str, content: dict[str, object], purpose: str) -> Planne
         content=json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         purpose=purpose,
     )
+
+
+def _portable_validator_content() -> str:
+    """Read the canonical standalone validator copied into every generated package."""
+    try:
+        return _PORTABLE_VALIDATOR_PATH.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise PlanError("离线验证器副本不可用。") from error
 
 
 def _assert_writable_parent(parent: Path) -> None:

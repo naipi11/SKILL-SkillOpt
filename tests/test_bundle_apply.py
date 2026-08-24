@@ -14,7 +14,8 @@ from agent_skillopt.errors import (
     StagingCleanupError,
     WriteConflictError,
 )
-from agent_skillopt.models import SkillSpec
+from agent_skillopt.models import PlannedFile, SkillSpec
+from agent_skillopt.validation import BundleValidationError
 
 
 @pytest.fixture
@@ -55,6 +56,24 @@ def test_apply_writes_a_complete_package_after_confirmation(sample_spec: SkillSp
 
     assert sample_spec.output_directory / "plugin.json" in written
     assert (sample_spec.output_directory / "skills" / sample_spec.name / "SKILL.md").is_file()
+
+
+def test_apply_refuses_to_publish_a_staging_bundle_that_fails_formal_validation(
+    sample_spec: SkillSpec,
+):
+    plan = build_plan(sample_spec)
+    invalid_files = tuple(
+        PlannedFile(file.relative_path, "not json", file.purpose)
+        if file.relative_path.as_posix() == "plugin.json"
+        else file
+        for file in plan.files
+    )
+    invalid_plan = replace(plan, files=invalid_files)
+
+    with pytest.raises(BundleValidationError, match="MANIFEST_JSON_INVALID"):
+        apply_plan(invalid_plan, invalid_plan.confirmation_token)
+
+    assert sample_spec.output_directory.exists() is False
 
 
 def test_apply_preserves_a_dangling_final_target_link(

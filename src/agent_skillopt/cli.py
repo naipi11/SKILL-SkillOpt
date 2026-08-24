@@ -16,6 +16,7 @@ from agent_skillopt.errors import (
     WriteConflictError,
 )
 from agent_skillopt.models import SkillSpec
+from agent_skillopt.validation import validate_bundle
 
 
 def _unavailable_handler(arguments: argparse.Namespace) -> int:
@@ -67,6 +68,17 @@ def _apply_handler(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _validate_handler(arguments: argparse.Namespace) -> int:
+    """Report deterministic offline bundle validation results."""
+    issues = validate_bundle(arguments.path)
+    if issues:
+        for issue in issues:
+            print(f"{issue.code} {issue.path}: {issue.message}", file=sys.stderr)
+        return 1
+    print("VALID")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build the 0.2.0 command parser."""
     parser = argparse.ArgumentParser(
@@ -86,7 +98,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     validate = subcommands.add_parser("validate", help="离线验证一个四宿主 Skill 包。")
     validate.add_argument("--path", type=Path, required=True)
-    validate.set_defaults(handler=_unavailable_handler)
+    validate.set_defaults(handler=_validate_handler)
 
     install = subcommands.add_parser("install", help="渲染或显式执行宿主安装命令。")
     install.add_argument(
