@@ -51,6 +51,7 @@ OPTIONAL_METADATA_FIELDS = (
 )
 REMOTE_LINK_SCHEMES = frozenset({"ftp", "ftps", "git", "http", "https", "ssh"})
 PERCENT_NORMALIZATION_LIMIT = 8
+FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 UNFINISHED = ("TODO", "TBD", "<skill-name>")
 
 
@@ -84,10 +85,16 @@ def validate_containment(
         filenames.sort()
         for name in [*directories, *filenames]:
             path = Path(directory) / name
-            if path.is_symlink():
+            if is_link_or_reparse_point(path):
                 unsafe.add(path)
+                if name in directories:
+                    directories.remove(name)
                 issues.append(
-                    ("PATH_OUTSIDE_BUNDLE", path, "symlinks are not accepted in a portable bundle")
+                    (
+                        "PATH_OUTSIDE_BUNDLE",
+                        path,
+                        "links and reparse points are not accepted in a portable bundle",
+                    )
                 )
                 continue
             if not contained(path, resolved_root):
@@ -276,12 +283,12 @@ def skill_tree(
     issues: list[tuple[str, Path, str]],
 ) -> None:
     skills = root / "skills"
-    if skills.is_symlink():
+    if is_link_or_reparse_point(skills):
         issues.append(
             (
                 "SKILL_DIRECTORY_COUNT_INVALID",
                 skills,
-                "canonical skills directory cannot be a symlink",
+                "canonical skills directory cannot be a link or reparse point",
             )
         )
         return
@@ -305,7 +312,7 @@ def skill_tree(
     directories = [
         child
         for child in children
-        if not child.is_symlink()
+        if not is_link_or_reparse_point(child)
         and child.is_dir()
         and child not in unsafe
         and contained(child, resolved_root)
@@ -321,8 +328,8 @@ def skill_tree(
     skill = directory / "SKILL.md"
     if skill in unsafe:
         return
-    if skill.is_symlink():
-        issues.append(("SKILL_FILE_MISSING", skill, "SKILL.md cannot be a symlink"))
+    if is_link_or_reparse_point(skill):
+        issues.append(("SKILL_FILE_MISSING", skill, "SKILL.md cannot be a link or reparse point"))
         return
     if not contained(skill, resolved_root):
         return
@@ -439,7 +446,7 @@ def exact_regular_file(root: Path, relative: Path) -> bool:
             child = next(child for child in current.iterdir() if child.name == component)
         except (OSError, StopIteration):
             return False
-        if child.is_symlink():
+        if is_link_or_reparse_point(child):
             return False
         if index == len(relative.parts) - 1:
             return child.is_file()
@@ -456,7 +463,7 @@ def exact_regular_directory(root: Path, relative: Path) -> bool:
             child = next(child for child in current.iterdir() if child.name == component)
         except (OSError, StopIteration):
             return False
-        if child.is_symlink():
+        if is_link_or_reparse_point(child):
             return False
         if index == len(relative.parts) - 1:
             return child.is_dir()
@@ -471,6 +478,27 @@ def contained(path: Path, resolved_root: Path) -> bool:
         return path.resolve().is_relative_to(resolved_root)
     except OSError:
         return False
+
+
+def is_link_or_reparse_point(path: Path) -> bool:
+    """Reject link indirection without resolving or following the directory entry."""
+    try:
+        if path.is_symlink():
+            return True
+    except OSError:
+        return False
+    is_junction = getattr(path, "is_junction", None)
+    if callable(is_junction):
+        try:
+            if is_junction():
+                return True
+        except OSError:
+            pass
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def json_values_equal(left: object, right: object) -> bool:

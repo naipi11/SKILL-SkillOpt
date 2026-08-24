@@ -179,3 +179,51 @@ All commands used
 - `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
 - `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
 - `git diff --check` — passed.
+
+## Repair round 4 — Windows reparse-point layout hardening
+
+- Added three focused regressions before implementation. Against the previous
+  repair, `python -m pytest tests/test_validation.py -k "link_detector or
+  reparse" -v` selected three tests and failed all three because the shared
+  reparse detector did not exist.
+- The shared detector first recognizes normal symlinks, uses `Path.is_junction()`
+  when that API is available, then inspects
+  `lstat().st_file_attributes & 0x0400` without resolving the entry. This is
+  compatible with Python 3.10, where `Path.is_junction()` is absent.
+- Containment and every canonical layout check now use that detector:
+  `skills/`, immediate `skills/<name>/`, `SKILL.md`, and exact required
+  file/directory path components. Detected directory links/reparse points are
+  also removed from `os.walk`'s directory list before traversal can descend.
+- The regressions use a truthful `lstat` stat-object simulation for
+  `FILE_ATTRIBUTE_REPARSE_POINT`, plus an `is_junction()` simulation. They prove
+  that a simulated `skills/` or Skill child reparse point is rejected before
+  `iterdir()` or `SKILL.md` reads; no privileged real-junction creation is
+  required.
+- An additional containment regression proves that a detected reparse directory
+  is removed from `os.walk`'s mutable directory list before the next walk step.
+- The runtime validator, packaged standalone asset, root wrapper, and fixture
+  wrapper were updated in lockstep. The three standalone copies remain
+  byte-identical and import no project package.
+
+## Repair round 4 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  54 passed.
+- `python -m pytest tests -v` — 66 passed.
+- `python -m compileall -q src tests scripts` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- SHA-256 of packaged asset, root wrapper, and fixture wrapper — all
+  `8C565FD25DC44A04CE5C8F6E4EE2D1C11453D0DB448CF0EDB859A492CDD05EBD`.
+- `git diff --check` — passed.
+
+## Repair round 4 residual risk
+
+The suite intentionally avoids a privileged live NTFS junction fixture. Its
+fallback behavior is exercised through a stat-object with the native reparse
+attribute and an `is_junction()` path simulation; Windows filesystem API
+behavior remains subject to host/filesystem implementation differences.

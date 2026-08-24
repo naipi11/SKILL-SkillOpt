@@ -60,6 +60,7 @@ _OPTIONAL_METADATA_FIELDS = (
 )
 _REMOTE_LINK_SCHEMES = frozenset({"ftp", "ftps", "git", "http", "https", "ssh"})
 _PERCENT_NORMALIZATION_LIMIT = 8
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,13 +135,15 @@ def _validate_containment(
         filenames.sort()
         for name in [*directories, *filenames]:
             candidate = current / name
-            if candidate.is_symlink():
+            if _is_link_or_reparse_point(candidate):
                 unsafe_paths.add(candidate)
+                if name in directories:
+                    directories.remove(name)
                 issues.append(
                     _issue(
                         "PATH_OUTSIDE_BUNDLE",
                         candidate,
-                        "symlinks are not accepted in a portable bundle",
+                        "links and reparse points are not accepted in a portable bundle",
                     )
                 )
                 continue
@@ -349,12 +352,12 @@ def _validate_skill_tree(
     issues: list[ValidationIssue],
 ) -> None:
     skills_directory = root / "skills"
-    if skills_directory.is_symlink():
+    if _is_link_or_reparse_point(skills_directory):
         issues.append(
             _issue(
                 "SKILL_DIRECTORY_COUNT_INVALID",
                 skills_directory,
-                "canonical skills directory cannot be a symlink",
+                "canonical skills directory cannot be a link or reparse point",
             )
         )
         return
@@ -378,7 +381,7 @@ def _validate_skill_tree(
     skill_directories = [
         child
         for child in children
-        if not child.is_symlink()
+        if not _is_link_or_reparse_point(child)
         and child.is_dir()
         and child not in unsafe_paths
         and _is_contained(child, resolved_root)
@@ -400,8 +403,10 @@ def _validate_skill_tree(
     skill_file = skill_directory / "SKILL.md"
     if skill_file in unsafe_paths:
         return
-    if skill_file.is_symlink():
-        issues.append(_issue("SKILL_FILE_MISSING", skill_file, "SKILL.md cannot be a symlink"))
+    if _is_link_or_reparse_point(skill_file):
+        issues.append(
+            _issue("SKILL_FILE_MISSING", skill_file, "SKILL.md cannot be a link or reparse point")
+        )
         return
     if not _is_contained(skill_file, resolved_root):
         return
@@ -509,7 +514,7 @@ def _has_exact_regular_file(root: Path, relative_path: Path) -> bool:
             child = next(child for child in current.iterdir() if child.name == component)
         except (OSError, StopIteration):
             return False
-        if child.is_symlink():
+        if _is_link_or_reparse_point(child):
             return False
         if index == len(relative_path.parts) - 1:
             return child.is_file()
@@ -526,7 +531,7 @@ def _has_exact_regular_directory(root: Path, relative_path: Path) -> bool:
             child = next(child for child in current.iterdir() if child.name == component)
         except (OSError, StopIteration):
             return False
-        if child.is_symlink():
+        if _is_link_or_reparse_point(child):
             return False
         if index == len(relative_path.parts) - 1:
             return child.is_dir()
@@ -541,6 +546,27 @@ def _is_contained(path: Path, resolved_root: Path) -> bool:
         return path.resolve().is_relative_to(resolved_root)
     except OSError:
         return False
+
+
+def _is_link_or_reparse_point(path: Path) -> bool:
+    """Reject link indirection without resolving or following the directory entry."""
+    try:
+        if path.is_symlink():
+            return True
+    except OSError:
+        return False
+    is_junction = getattr(path, "is_junction", None)
+    if callable(is_junction):
+        try:
+            if is_junction():
+                return True
+        except OSError:
+            pass
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _json_values_equal(left: object, right: object) -> bool:

@@ -3,11 +3,12 @@ import subprocess
 import sys
 from importlib import resources
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import quote
 
 import pytest
 
-from agent_skillopt import bundle
+from agent_skillopt import bundle, validation
 from agent_skillopt.cli import main
 from agent_skillopt.models import SkillSpec
 from agent_skillopt.validation import BundleValidationError, assert_valid_bundle, validate_bundle
@@ -482,3 +483,101 @@ def test_validator_aggregates_optional_metadata_drift_with_invalid_host_identity
     codes = {issue.code for issue in validate_bundle(minimal_bundle)}
 
     assert {"MANIFEST_METADATA_INVALID", "MANIFEST_METADATA_MISMATCH"} <= codes
+
+
+def test_link_detector_rejects_junctions_and_lstat_reparse_points():
+    class JunctionPath:
+        def is_symlink(self) -> bool:
+            return False
+
+        def is_junction(self) -> bool:
+            return True
+
+        def lstat(self) -> object:
+            raise AssertionError("a reported junction must not need lstat")
+
+    class ReparsePointPath:
+        def is_symlink(self) -> bool:
+            return False
+
+        def lstat(self) -> SimpleNamespace:
+            return SimpleNamespace(st_file_attributes=0x0400)
+
+    assert validation._is_link_or_reparse_point(JunctionPath())
+    assert validation._is_link_or_reparse_point(ReparsePointPath())
+
+
+def test_validator_rejects_a_reparse_skills_directory_before_reading_it(
+    minimal_bundle: Path, monkeypatch: pytest.MonkeyPatch
+):
+    skills = minimal_bundle / "skills"
+    original_detector = validation._is_link_or_reparse_point
+    original_iterdir = Path.iterdir
+
+    monkeypatch.setattr(
+        validation,
+        "_is_link_or_reparse_point",
+        lambda path: path == skills or original_detector(path),
+    )
+
+    def guarded_iterdir(path: Path):
+        if path == skills:
+            raise AssertionError("a reparse skills directory must not be traversed")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+
+    codes = {issue.code for issue in validate_bundle(minimal_bundle)}
+
+    assert {"PATH_OUTSIDE_BUNDLE", "SKILL_DIRECTORY_COUNT_INVALID"} <= codes
+
+
+def test_containment_prunes_a_reparse_directory_before_walk_descends(
+    minimal_bundle: Path, monkeypatch: pytest.MonkeyPatch
+):
+    skills = minimal_bundle / "skills"
+    scheduled_directories = ["skills"]
+    original_detector = validation._is_link_or_reparse_point
+
+    def guarded_walk(root: Path, followlinks: bool):
+        yield str(root), scheduled_directories, []
+        if scheduled_directories:
+            raise AssertionError("a reparse directory must be pruned before os.walk descends")
+
+    monkeypatch.setattr("agent_skillopt.validation.os.walk", guarded_walk)
+    monkeypatch.setattr(
+        validation,
+        "_is_link_or_reparse_point",
+        lambda path: path == skills or original_detector(path),
+    )
+
+    codes = {issue.code for issue in validate_bundle(minimal_bundle)}
+
+    assert scheduled_directories == []
+    assert {"PATH_OUTSIDE_BUNDLE", "SKILL_DIRECTORY_COUNT_INVALID"} <= codes
+
+
+def test_validator_rejects_a_reparse_skill_child_before_reading_it(
+    minimal_bundle: Path, monkeypatch: pytest.MonkeyPatch
+):
+    skill_directory = minimal_bundle / "skills" / "minimal-skill"
+    skill_file = skill_directory / "SKILL.md"
+    original_detector = validation._is_link_or_reparse_point
+    original_read_text = Path.read_text
+
+    monkeypatch.setattr(
+        validation,
+        "_is_link_or_reparse_point",
+        lambda path: path == skill_directory or original_detector(path),
+    )
+
+    def guarded_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == skill_file:
+            raise AssertionError("a reparse Skill directory must not be traversed")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read_text)
+
+    codes = {issue.code for issue in validate_bundle(minimal_bundle)}
+
+    assert {"PATH_OUTSIDE_BUNDLE", "SKILL_DIRECTORY_COUNT_INVALID"} <= codes
