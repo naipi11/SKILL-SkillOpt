@@ -322,3 +322,55 @@ Fresh verification after the review repair, with the source-first venv:
   `git diff --check` — passed.
 - The exact Windows Python 3.12 render-only wrapper command for Codex returned
   exit 0 and JSON plan output without `--execute`; it did not invoke a host.
+
+## Review repair — Hermes explicit owner/repository source contract
+
+Acceptance review found that `_required_git_source()` only rejected empty,
+whitespace, option-looking, and Windows-CMD-unsafe values. It consequently
+allowed a bare Hermes index name, local path, URL, or extra slash component even
+though the v0.2 product contract documents an explicit `<owner>/<repository>`
+Git source.
+
+### Scope delivered
+
+- Added a narrow ASCII source grammar: exactly two slash-separated components,
+  each beginning with an alphanumeric character and continuing only with
+  alphanumerics, `.`, `_`, or `-`. CMD metacharacter/control rejection remains
+  the earlier, separate argv safety gate. This accepts ordinary values such as
+  `owner-name/repository_name.v2` while rejecting bare names, local or absolute
+  paths, URLs, empty/dot components, and extra components.
+- Added direct positive and negative plan tests. The regression set covers
+  ordinary hyphen/underscore/dot identifiers plus a bare index, whitespace,
+  Windows and POSIX paths, an absolute path, URL, extra/empty components, dot
+  components, and an option-looking value.
+- Made README, the installed Skill, host-installation reference, compatibility
+  note, and CLI help consistently specify an explicit `<owner>/<repository>`
+  Git source. The Hermes command remains render-only unless a caller supplies
+  the separate `--execute` confirmation flow.
+
+### Fresh verification
+
+All source-first Python checks used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`
+with this checkout's `src` on `PYTHONPATH`:
+
+- `python -m pytest tests/test_installation.py -q` — 79 passed.
+- `python -m pytest tests -q` — 180 passed.
+- `python -m ruff check src tests skills/agent-skillopt/scripts` — passed.
+- `python -m compileall -q src tests skills/agent-skillopt/scripts` — passed.
+- `python scripts/validate_bundle.py .` — `VALID`.
+- Git Bash `scripts/validate.sh` with the same source-first venv — 180 passed,
+  root `VALID`, and Ruff passed.
+- `git diff --check` — passed.
+- The exact system Python 3.12 wrapper render,
+  `C:\\Users\\33384\\AppData\\Local\\Programs\\Python\\Python312\\python.exe skills\\agent-skillopt\\scripts\\scaffold_bundle.py install --host hermes --path . --source owner/repository`,
+  exited 0 and printed the two Hermes argv tuples with `network_required: true`.
+  It omitted `--execute`; no host installation, enablement, inspection,
+  restart, or remote fetch was invoked.
+
+### Residual scope
+
+This deliberately preserves the reviewed v0.2 provenance contract and does
+not add support for Hermes bare index names, local paths, or Git URLs. Hermes
+execution remains a separately confirmation-gated, mutable-remote-content
+trust boundary; no host operation was performed for this repair.
