@@ -3,15 +3,42 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+
+from agent_skillopt.bundle import build_plan, render_preview
+from agent_skillopt.errors import AgentSkillOptError, SpecError
+from agent_skillopt.models import SkillSpec
 
 
 def _unavailable_handler(arguments: argparse.Namespace) -> int:
     """Report commands whose behavior belongs to a later implementation task."""
     print(f"所选操作尚未可用，等待后续实现任务完成：{arguments.command}", file=sys.stderr)
     return 2
+
+
+def _read_spec_argument(value: str) -> str:
+    """Read a preview specification from standard input or one UTF-8 JSON file."""
+    if value == "-":
+        return sys.stdin.read()
+    try:
+        return Path(value).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise SpecError("无法读取 UTF-8 JSON 规格文件。") from error
+
+
+def _preview_handler(arguments: argparse.Namespace) -> int:
+    """Render one write-free package preview from a strict JSON specification."""
+    try:
+        specification = SkillSpec.from_json(_read_spec_argument(arguments.spec))
+        preview = render_preview(build_plan(specification))
+    except AgentSkillOptError:
+        print("预览失败：规格无效。", file=sys.stderr)
+        return 2
+    print(json.dumps(preview, ensure_ascii=False, sort_keys=True))
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -24,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     preview = subcommands.add_parser("preview", help="预览将要创建的四宿主 Skill 包。")
     preview.add_argument("--spec", required=True, help="JSON 规格文件路径，或 - 表示标准输入。")
-    preview.set_defaults(handler=_unavailable_handler)
+    preview.set_defaults(handler=_preview_handler)
 
     apply = subcommands.add_parser("apply", help="在确认后创建四宿主 Skill 包。")
     apply.add_argument("--spec", required=True)
