@@ -27,3 +27,15 @@ class WriteConflictError(AgentSkillOptError):
     def __init__(self, path: Path) -> None:
         self.path = path
         super().__init__(f"输出目录已存在：{path}")
+
+
+class PublicationError(AgentSkillOptError):
+    """Raised when an atomic no-clobber publication cannot be completed."""
+
+
+class StagingCleanupError(AgentSkillOptError):
+    """Raised when a failed apply operation leaves its staging directory behind."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(f"暂存目录清理失败，残留路径：{path}")

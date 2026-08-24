@@ -67,7 +67,7 @@ class SkillSpec:
             raise SpecError("body 不能以 YAML frontmatter 开头。")
 
         output_value = _required_text(data["output_directory"], "output_directory")
-        output_directory = Path(output_value).expanduser().resolve()
+        output_directory = Path(output_value).expanduser().absolute()
         version = data.get("version", "0.1.0")
         if not isinstance(version, str) or not _SEMANTIC_VERSION_PATTERN.fullmatch(version):
             raise SpecError("version 必须是有效的语义化版本。")

@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from agent_skillopt.errors import ConfirmationError, PlanError, WriteConflictError
+from agent_skillopt.errors import (
+    ConfirmationError,
+    PlanError,
+    PublicationError,
+    StagingCleanupError,
+    WriteConflictError,
+)
 from agent_skillopt.models import BundlePlan, PlannedFile, ResourceSpec, SkillSpec
 
 _RESOURCE_DIRECTORIES = {"reference": "references", "script": "scripts", "asset": "assets"}
@@ -82,8 +91,9 @@ def apply_plan(plan: BundlePlan, confirmation_token: str) -> tuple[Path, ...]:
     if confirmation_token != plan.confirmation_token:
         raise ConfirmationError("confirmation token is missing or stale.")
 
-    target = plan.output_directory.resolve()
-    _raise_if_target_exists(target)
+    raw_target = plan.output_directory
+    _raise_if_target_exists(raw_target)
+    target = raw_target.resolve()
     parent = target.parent.resolve()
     _assert_writable_parent(parent)
 
@@ -91,14 +101,14 @@ def apply_plan(plan: BundlePlan, confirmation_token: str) -> tuple[Path, ...]:
     try:
         staging_directory = Path(
             tempfile.mkdtemp(prefix=f".{target.name}.staging-", dir=parent)
-        ).resolve()
+        )
+        staging_directory = staging_directory.resolve()
         _write_staged_files(staging_directory, plan.files)
         _assert_staged_file_presence(staging_directory, plan.files)
-        _raise_if_target_exists(target)
-        staging_directory.replace(target)
-    except Exception:
+        _publish_staging_no_clobber(staging_directory, target)
+    except BaseException:
         if staging_directory is not None:
-            shutil.rmtree(staging_directory, ignore_errors=True)
+            _remove_staging_directory(staging_directory)
         raise
 
     return tuple(target / Path(*planned_file.relative_path.parts) for planned_file in plan.files)
@@ -118,8 +128,69 @@ def _assert_writable_parent(parent: Path) -> None:
 
 
 def _raise_if_target_exists(target: Path) -> None:
-    if os.path.lexists(target):
+    if _path_lexists(target):
         raise WriteConflictError(target)
+
+
+def _path_lexists(path: Path) -> bool:
+    return os.path.lexists(path)
+
+
+def _publish_staging_no_clobber(staging_directory: Path, target: Path) -> None:
+    if sys.platform == "win32":
+        _publish_on_windows(staging_directory, target)
+        return
+    if sys.platform.startswith("linux"):
+        _publish_on_linux(staging_directory, target)
+        return
+    raise PublicationError("Atomic no-clobber publication is unsupported on this platform.")
+
+
+def _publish_on_windows(staging_directory: Path, target: Path) -> None:
+    move_file = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileW
+    move_file.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+    move_file.restype = ctypes.c_int
+    if move_file(str(staging_directory), str(target)):
+        return
+
+    error_code = ctypes.get_last_error()
+    if error_code in {80, 183}:
+        raise WriteConflictError(target)
+    raise PublicationError("Windows atomic no-clobber publication failed.") from ctypes.WinError(
+        error_code
+    )
+
+
+def _publish_on_linux(staging_directory: Path, target: Path) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise PublicationError("Linux renameat2 is unavailable for no-clobber publication.")
+
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+    if renameat2(-100, os.fsencode(staging_directory), -100, os.fsencode(target), 1) == 0:
+        return
+
+    error_code = ctypes.get_errno()
+    if error_code == errno.EEXIST:
+        raise WriteConflictError(target)
+    raise PublicationError("Linux atomic no-clobber publication failed.") from OSError(
+        error_code, os.strerror(error_code)
+    )
+
+
+def _remove_staging_directory(staging_directory: Path) -> None:
+    try:
+        shutil.rmtree(staging_directory)
+    except OSError as error:
+        raise StagingCleanupError(staging_directory) from error
 
 
 def _write_staged_files(staging_root: Path, files: tuple[PlannedFile, ...]) -> None:
