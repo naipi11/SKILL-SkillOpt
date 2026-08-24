@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from shutil import copytree
 from types import SimpleNamespace
 
 import pytest
@@ -89,6 +90,26 @@ def test_plan_token_is_deterministic_and_captures_the_rendered_operation(valid_b
     assert first.confirmation_token != changed_source.confirmation_token
 
 
+@pytest.mark.parametrize(
+    "character", ("&", "|", "<", ">", "(", ")", "^", "%", "!", '"', "'", "\n", "\r")
+)
+def test_build_plan_rejects_windows_command_metacharacters_in_a_local_root(character: str):
+    unsafe_root = Path(f"bundle{character}root")
+
+    with pytest.raises(SpecError, match="unsafe"):
+        build_install_plan("codex", unsafe_root, None)
+
+
+@pytest.mark.parametrize(
+    "source", ("owner/repository&next", 'owner/"repository', "owner/repository\nnext")
+)
+def test_build_plan_rejects_windows_command_metacharacters_in_hermes_source(
+    source: str, valid_bundle: Path
+):
+    with pytest.raises(SpecError, match="unsafe"):
+        build_install_plan("hermes", valid_bundle, source)
+
+
 def test_local_root_with_spaces_stays_a_single_argv_token(valid_bundle: Path, tmp_path: Path):
     spaced_root = tmp_path / "bundle root"
     valid_bundle.rename(spaced_root)
@@ -97,6 +118,73 @@ def test_local_root_with_spaces_stays_a_single_argv_token(valid_bundle: Path, tm
 
     assert plan.steps[0][-1] == str(spaced_root)
     assert len(plan.steps[0]) == 5
+
+
+def test_plan_uses_a_canonical_root_when_relative_cwd_changes(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path, tmp_path: Path
+):
+    monkeypatch.chdir(valid_bundle)
+    plan = build_install_plan("codex", Path("."), None)
+    expected_root = valid_bundle.resolve()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    assert plan.bundle_root == expected_root
+    assert plan.steps[0][-1] == str(expected_root)
+
+    monkeypatch.chdir(elsewhere)
+    assert execute_install(plan, plan.confirmation_token, lambda step: calls.append(step) or 0) == 0
+
+    assert calls == list(plan.steps)
+
+
+def test_execute_install_rejects_in_place_bundle_content_drift_without_a_runner(valid_bundle: Path):
+    plan = build_install_plan("codex", valid_bundle, None)
+    calls: list[tuple[str, ...]] = []
+    (valid_bundle / "README.md").write_text("changed in place", encoding="utf-8")
+    changed_plan = build_install_plan("codex", valid_bundle, None)
+
+    assert changed_plan.bundle_fingerprint != plan.bundle_fingerprint
+    assert changed_plan.confirmation_token != plan.confirmation_token
+
+    with pytest.raises(ConfirmationError, match="stale"):
+        execute_install(plan, plan.confirmation_token, calls.append)
+
+    assert calls == []
+
+
+def test_execute_install_rejects_same_name_root_replacement_without_a_runner(
+    valid_bundle: Path, tmp_path: Path
+):
+    plan = build_install_plan("codex", valid_bundle, None)
+    original_root = tmp_path / "original-root"
+    valid_bundle.rename(original_root)
+    copytree(original_root, valid_bundle)
+    calls: list[tuple[str, ...]] = []
+
+    with pytest.raises(ConfirmationError, match="stale"):
+        execute_install(plan, plan.confirmation_token, calls.append)
+
+    assert calls == []
+
+
+def test_execute_install_rejects_a_root_that_becomes_a_link_without_a_runner(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path
+):
+    plan = build_install_plan("codex", valid_bundle, None)
+    calls: list[tuple[str, ...]] = []
+    original_is_symlink = Path.is_symlink
+
+    def root_is_link(path: Path) -> bool:
+        return path == plan.bundle_root or original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", root_is_link)
+
+    with pytest.raises(ConfirmationError, match="stale"):
+        execute_install(plan, plan.confirmation_token, calls.append)
+
+    assert calls == []
 
 
 def test_execute_install_requires_the_rendered_token(valid_bundle: Path):
@@ -209,3 +297,58 @@ def test_install_execute_uses_shell_false_after_an_exact_confirmation(
     )
 
     assert calls == [(step, False, False) for step in plan.steps]
+
+
+def test_install_execute_reports_a_runner_os_error_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path, capsys
+):
+    plan = build_install_plan("codex", valid_bundle, None)
+
+    def missing_host(*args: object, **kwargs: object) -> SimpleNamespace:
+        raise FileNotFoundError("host command is absent")
+
+    monkeypatch.setattr("agent_skillopt.cli.subprocess.run", missing_host)
+
+    assert (
+        main(
+            [
+                "install",
+                "--host",
+                "codex",
+                "--path",
+                str(valid_bundle),
+                "--execute",
+                "--confirm",
+                plan.confirmation_token,
+            ]
+        )
+        == 1
+    )
+
+    error_output = capsys.readouterr().err
+    assert "安装执行失败" in error_output
+    assert "Traceback" not in error_output
+
+
+def test_hermes_render_warning_describes_the_mutable_remote_content_boundary(
+    valid_bundle: Path, capsys
+):
+    assert (
+        main(
+            [
+                "install",
+                "--host",
+                "hermes",
+                "--path",
+                str(valid_bundle),
+                "--source",
+                "owner/repository",
+            ]
+        )
+        == 0
+    )
+
+    warning = capsys.readouterr().err
+    assert "执行时" in warning
+    assert "远程内容" in warning
+    assert "可能变化" in warning

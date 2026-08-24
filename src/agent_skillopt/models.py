@@ -111,6 +111,9 @@ class InstallPlan:
     steps: tuple[tuple[str, ...], ...]
     confirmation_token: str
     network_required: bool
+    bundle_root: Path
+    bundle_fingerprint: str
+    bundle_root_identity: tuple[int, int]
 
 
 def _required_text(value: object, field: str) -> str:

@@ -95,7 +95,11 @@ def _install_handler(arguments: argparse.Namespace) -> int:
         return 2
 
     if plan.network_required:
-        print("警告：此 Hermes 安装计划会访问指定的 Git 源。", file=sys.stderr)
+        print(
+            "警告：执行时会从指定 Git 源获取远程内容；远程内容可能变化，这是信任边界，"
+            "确认令牌不固定远程修订。",
+            file=sys.stderr,
+        )
     print(
         json.dumps(
             {
@@ -115,6 +119,9 @@ def _install_handler(arguments: argparse.Namespace) -> int:
     except ConfirmationError:
         print("安装失败：确认令牌无效。", file=sys.stderr)
         return 2
+    except OSError:
+        print("安装执行失败：无法启动宿主命令。", file=sys.stderr)
+        return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
