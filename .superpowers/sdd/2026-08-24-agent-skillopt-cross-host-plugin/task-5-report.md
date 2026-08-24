@@ -300,3 +300,25 @@ before an external host consumes it. The ctime normalization does not expand
 that interval; it applies only to the known incompatible Windows path/descriptor
 representation boundary. Hermes remains an independent mutable-remote-content
 trust boundary at explicit execution time.
+
+## Review repair — final post-close path ctime regression
+
+Acceptance review found that the prior path-ctime test called the strict
+comparison helper directly, without exercising `_read_stable_file()`'s final
+post-close path observation. Replaced it with a function-level regression that
+returns the normal first `_regular_file_state()` result, changes only ctime on
+the second/final path observation, leaves both fstat observations untouched,
+and asserts `_read_stable_file()` raises `SpecError`. The initial
+lstat-to-fstat ctime compatibility test and strict descriptor pre/post-read
+tests remain in place.
+
+Fresh verification after the review repair, with the source-first venv:
+
+- `python -m pytest tests/test_installation.py -v` — 65 passed.
+- `python -m compileall -q src tests skills\\agent-skillopt\\scripts` — passed.
+- `python -m pytest tests -q` — 166 passed.
+- `python scripts\\validate_bundle.py .` — `VALID`.
+- `python -m ruff check src tests skills\\agent-skillopt\\scripts` and
+  `git diff --check` — passed.
+- The exact Windows Python 3.12 render-only wrapper command for Codex returned
+  exit 0 and JSON plan output without `--execute`; it did not invoke a host.
