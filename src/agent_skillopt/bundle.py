@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import tempfile
+from importlib import resources
 from pathlib import Path, PurePosixPath
 
 from agent_skillopt.errors import (
@@ -23,22 +24,17 @@ from agent_skillopt.models import BundlePlan, PlannedFile, ResourceSpec, SkillSp
 from agent_skillopt.validation import assert_valid_bundle
 
 _RESOURCE_DIRECTORIES = {"reference": "references", "script": "scripts", "asset": "assets"}
-_PORTABLE_VALIDATOR_PATH = Path(__file__).resolve().parents[2] / "tests" / "validate_bundle.py"
 
 
 def build_plan(spec: SkillSpec) -> BundlePlan:
     """Render a complete, deterministic package tree in memory and perform no writes."""
     files = [
         _planned_json("plugin.json", _root_manifest(spec), "portable root manifest"),
-        _planned_json(
-            ".codex-plugin/plugin.json", _host_manifest(spec), "Codex plugin manifest"
-        ),
+        _planned_json(".codex-plugin/plugin.json", _host_manifest(spec), "Codex plugin manifest"),
         _planned_json(
             ".agents/plugins/marketplace.json", _marketplace_manifest(spec), "Codex marketplace"
         ),
-        _planned_json(
-            ".claude-plugin/plugin.json", _host_manifest(spec), "Claude plugin manifest"
-        ),
+        _planned_json(".claude-plugin/plugin.json", _host_manifest(spec), "Claude plugin manifest"),
         _planned_json(
             ".claude-plugin/marketplace.json", _marketplace_manifest(spec), "Claude marketplace"
         ),
@@ -49,7 +45,8 @@ def build_plan(spec: SkillSpec) -> BundlePlan:
         ),
         PlannedFile(PurePosixPath("README.md"), _readme_content(spec), "package README"),
         PlannedFile(
-            PurePosixPath("tests/validate_bundle.py"), _portable_validator_content(),
+            PurePosixPath("tests/validate_bundle.py"),
+            _portable_validator_content(),
             "offline bundle validator",
         ),
     ]
@@ -116,7 +113,11 @@ def _planned_json(path: str, content: dict[str, object], purpose: str) -> Planne
 def _portable_validator_content() -> str:
     """Read the canonical standalone validator copied into every generated package."""
     try:
-        return _PORTABLE_VALIDATOR_PATH.read_text(encoding="utf-8")
+        return (
+            resources.files("agent_skillopt")
+            .joinpath("assets/validate_bundle.py")
+            .read_text(encoding="utf-8")
+        )
     except (OSError, UnicodeError) as error:
         raise PlanError("离线验证器副本不可用。") from error
 

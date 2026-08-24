@@ -25,6 +25,22 @@ REQUIRED = (
     Path("README.md"),
     Path("tests/validate_bundle.py"),
 )
+ROOT_FIELDS = frozenset(
+    {
+        "$schema",
+        "name",
+        "version",
+        "description",
+        "author",
+        "homepage",
+        "repository",
+        "license",
+        "keywords",
+        "extensions",
+    }
+)
+AUTHOR_FIELDS = frozenset({"name", "email", "url"})
+UNFINISHED = ("TODO", "TBD", "<skill-name>")
 
 
 def validate(root: Path) -> list[tuple[str, Path, str]]:
@@ -33,23 +49,8 @@ def validate(root: Path) -> list[tuple[str, Path, str]]:
     if not root.is_dir():
         return [("BUNDLE_ROOT_INVALID", root, "bundle root must be a directory")]
     resolved_root = root.resolve()
-    for directory, directories, filenames in os.walk(root, followlinks=False):
-        for name in sorted([*directories, *filenames]):
-            path = Path(directory) / name
-            try:
-                contained = path.resolve().is_relative_to(resolved_root)
-            except OSError:
-                contained = False
-            if not contained:
-                issues.append(
-                    ("PATH_OUTSIDE_BUNDLE", path, "resolved path escapes the bundle root")
-                )
-    present = {relative: (root / relative).is_file() for relative in REQUIRED}
-    for relative, exists in present.items():
-        if not exists:
-            issues.append(
-                ("REQUIRED_FILE_MISSING", root / relative, "required bundle file is missing")
-            )
+    unsafe = validate_containment(root, resolved_root, issues)
+    present = validate_required(root, resolved_root, unsafe, issues)
     root_manifest = load(root / "plugin.json", issues) if present[Path("plugin.json")] else None
     identity = root_identity(root / "plugin.json", root_manifest, issues)
     if identity is None:
@@ -60,8 +61,45 @@ def validate(root: Path) -> list[tuple[str, Path, str]]:
     for relative in MARKETS:
         manifest = load(root / relative, issues) if present[relative] else None
         marketplace(root / relative, manifest, identity["name"], issues)
-    skill_tree(root, identity, issues)
+    skill_tree(root, resolved_root, unsafe, identity, issues)
     return issues
+
+
+def validate_containment(
+    root: Path, resolved_root: Path, issues: list[tuple[str, Path, str]]
+) -> set[Path]:
+    unsafe: set[Path] = set()
+    for directory, directories, filenames in os.walk(root, followlinks=False):
+        directories.sort()
+        filenames.sort()
+        for name in [*directories, *filenames]:
+            path = Path(directory) / name
+            if not contained(path, resolved_root):
+                unsafe.add(path)
+                issues.append(
+                    ("PATH_OUTSIDE_BUNDLE", path, "resolved path escapes the bundle root")
+                )
+    return unsafe
+
+
+def validate_required(
+    root: Path,
+    resolved_root: Path,
+    unsafe: set[Path],
+    issues: list[tuple[str, Path, str]],
+) -> dict[Path, bool]:
+    present: dict[Path, bool] = {}
+    for relative in REQUIRED:
+        path = root / relative
+        exists = (
+            exact_regular_file(root, relative)
+            and path not in unsafe
+            and contained(path, resolved_root)
+        )
+        present[relative] = exists
+        if not exists:
+            issues.append(("REQUIRED_FILE_MISSING", path, "required bundle file is missing"))
+    return present
 
 
 def load(path: Path, issues: list[tuple[str, Path, str]]) -> dict[str, object] | None:
@@ -74,6 +112,58 @@ def load(path: Path, issues: list[tuple[str, Path, str]]) -> dict[str, object] |
         issues.append(("MANIFEST_JSON_INVALID", path, "manifest must be a JSON object"))
         return None
     return value
+
+
+def root_identity(
+    path: Path, manifest: dict[str, object] | None, issues: list[tuple[str, Path, str]]
+) -> dict[str, str] | None:
+    if manifest is None:
+        return None
+    validate_root_fields(path, manifest, issues)
+    if manifest.get("$schema") != SCHEMA_URL:
+        issues.append(("MANIFEST_SCHEMA_INVALID", path, "manifest schema URL is invalid"))
+    identity = required_identity(path, manifest, issues)
+    if identity is not None:
+        for field in ("repository", "license"):
+            value = manifest.get(field)
+            if isinstance(value, str):
+                identity[field] = value
+    return identity
+
+
+def validate_root_fields(
+    path: Path, manifest: dict[str, object], issues: list[tuple[str, Path, str]]
+) -> None:
+    for field in sorted(set(manifest) - ROOT_FIELDS):
+        issues.append(
+            ("ROOT_MANIFEST_UNKNOWN_FIELD", path, f"{field} is not an Agent Plugins v1 field")
+        )
+    for field in ("homepage", "repository", "license"):
+        if field in manifest and not isinstance(manifest[field], str):
+            issues.append(("ROOT_MANIFEST_OPTIONAL_TYPE_INVALID", path, f"{field} must be text"))
+    if "keywords" in manifest and (
+        not isinstance(manifest["keywords"], list)
+        or not all(isinstance(keyword, str) for keyword in manifest["keywords"])
+    ):
+        issues.append(
+            ("ROOT_MANIFEST_OPTIONAL_TYPE_INVALID", path, "keywords must be a list of text")
+        )
+    if "author" in manifest:
+        author = manifest["author"]
+        if not isinstance(author, dict) or any(
+            field not in AUTHOR_FIELDS or not isinstance(value, str)
+            for field, value in author.items()
+        ):
+            issues.append(
+                ("ROOT_MANIFEST_OPTIONAL_TYPE_INVALID", path, "author must be a text-only object")
+            )
+    if "extensions" in manifest and (
+        not isinstance(manifest["extensions"], dict)
+        or not all(isinstance(value, dict) for value in manifest["extensions"].values())
+    ):
+        issues.append(
+            ("ROOT_MANIFEST_OPTIONAL_TYPE_INVALID", path, "extensions must be an object of objects")
+        )
 
 
 def required_identity(
@@ -93,16 +183,6 @@ def required_identity(
     if not SEMVER.fullmatch(result["version"]):
         issues.append(("MANIFEST_VERSION_INVALID", path, "version must be semantic"))
     return result
-
-
-def root_identity(
-    path: Path, manifest: dict[str, object] | None, issues: list[tuple[str, Path, str]]
-) -> dict[str, str] | None:
-    if manifest is None:
-        return None
-    if manifest.get("$schema") != SCHEMA_URL:
-        issues.append(("MANIFEST_SCHEMA_INVALID", path, "manifest schema URL is invalid"))
-    return required_identity(path, manifest, issues)
 
 
 def host(
@@ -145,18 +225,33 @@ def marketplace(
     plugins = manifest.get("plugins")
     if not isinstance(plugins, list) or len(plugins) != 1 or not isinstance(plugins[0], dict):
         issues.append(("MARKETPLACE_STRUCTURE_INVALID", path, "marketplace needs one plugin entry"))
-    elif plugins[0].get("name") != expected_name or plugins[0].get("source") != "./":
+        return
+    plugin = plugins[0]
+    if plugin.get("name") != expected_name or plugin.get("source") != "./":
         issues.append(
             ("MARKETPLACE_SOURCE_INVALID", path, "plugin must use matching name and './' source")
         )
 
 
-def skill_tree(root: Path, identity: dict[str, str], issues: list[tuple[str, Path, str]]) -> None:
+def skill_tree(
+    root: Path,
+    resolved_root: Path,
+    unsafe: set[Path],
+    identity: dict[str, str],
+    issues: list[tuple[str, Path, str]],
+) -> None:
     skills = root / "skills"
+    if skills in unsafe or not contained(skills, resolved_root):
+        return
     try:
-        directories = [child for child in skills.iterdir() if child.is_dir()]
+        children = sorted(skills.iterdir(), key=lambda child: child.name)
     except OSError:
-        directories = []
+        children = []
+    directories = [
+        child
+        for child in children
+        if child.is_dir() and child not in unsafe and contained(child, resolved_root)
+    ]
     if len(directories) != 1:
         issues.append(
             ("SKILL_DIRECTORY_COUNT_INVALID", skills, "exactly one Skill directory is required")
@@ -166,7 +261,9 @@ def skill_tree(root: Path, identity: dict[str, str], issues: list[tuple[str, Pat
     if directory.name != identity["name"]:
         issues.append(("SKILL_NAME_MISMATCH", directory, "Skill directory must match plugin name"))
     skill = directory / "SKILL.md"
-    if not skill.is_file():
+    if skill in unsafe or not contained(skill, resolved_root):
+        return
+    if not exact_regular_file(directory, Path("SKILL.md")):
         issues.append(("SKILL_FILE_MISSING", skill, "SKILL.md is required"))
         return
     try:
@@ -179,31 +276,22 @@ def skill_tree(root: Path, identity: dict[str, str], issues: list[tuple[str, Pat
         issues.append(
             ("SKILL_FRONTMATTER_INVALID", skill, "frontmatter must be strict name and description")
         )
-    else:
-        if frontmatter["name"] != identity["name"]:
-            issues.append(
-                ("SKILL_NAME_MISMATCH", skill, "frontmatter name differs from plugin name")
+        return
+    if frontmatter["name"] != identity["name"]:
+        issues.append(("SKILL_NAME_MISMATCH", skill, "frontmatter name differs from plugin.json"))
+    if frontmatter["description"] != identity["description"]:
+        issues.append(
+            (
+                "SKILL_DESCRIPTION_MISMATCH",
+                skill,
+                "frontmatter description differs from plugin.json",
             )
-        if frontmatter["description"] != identity["description"]:
-            issues.append(
-                (
-                    "SKILL_DESCRIPTION_MISMATCH",
-                    skill,
-                    "frontmatter description differs from plugin.json",
-                )
-            )
-    if any(marker in content for marker in ("TODO", "TBD", "<skill-name>")):
+        )
+    if any(marker in content for marker in UNFINISHED):
         issues.append(("SKILL_UNFINISHED_MARKER", skill, "unfinished scaffold marker found"))
-    for target in re.findall(r"!?\[[^\]]*\]\(([^)]+)\)", content):
-        target = target.strip().strip("<>").split("#", 1)[0].split("?", 1)[0]
-        if target and "://" not in target and not target.startswith("mailto:"):
-            if (
-                ".." in PurePosixPath(target.replace("\\", "/")).parts
-                or ".." in PureWindowsPath(target).parts
-            ):
-                issues.append(
-                    ("SKILL_PATH_TRAVERSAL", skill, "Markdown resource link contains '..'")
-                )
+    for target in markdown_targets(content):
+        if contains_parent_reference(target):
+            issues.append(("SKILL_PATH_TRAVERSAL", skill, "Markdown resource link contains '..'"))
 
 
 def parse_frontmatter(content: str) -> dict[str, str] | None:
@@ -219,10 +307,77 @@ def parse_frontmatter(content: str) -> dict[str, str] | None:
         if ":" not in line:
             return None
         key, value = line.split(":", 1)
-        if key not in {"name", "description"} or key in result or not value.strip():
+        if key not in {"name", "description"} or key in result:
             return None
-        result[key] = value.strip().strip('"')
+        scalar = parse_scalar(value)
+        if scalar is None:
+            return None
+        result[key] = scalar
     return result if set(result) == {"name", "description"} else None
+
+
+def parse_scalar(value: str) -> str | None:
+    if not value.startswith(" ") or value != value.rstrip() or "\t" in value:
+        return None
+    scalar = value[1:]
+    if not scalar:
+        return None
+    if scalar.startswith('"'):
+        try:
+            decoded = json.loads(scalar)
+        except json.JSONDecodeError:
+            return None
+        return decoded if isinstance(decoded, str) and decoded else None
+    if scalar.startswith("'"):
+        if not scalar.endswith("'") or len(scalar) < 2:
+            return None
+        inner = scalar[1:-1]
+        if "'" in inner.replace("''", ""):
+            return None
+        return inner.replace("''", "'") or None
+    if scalar[0] in "[{|>&*!#" or " #" in scalar or ": " in scalar:
+        return None
+    return scalar
+
+
+def markdown_targets(content: str) -> tuple[str, ...]:
+    inline = re.findall(r"!?\[[^\]]*\]\(([^)]+)\)", content)
+    references = re.findall(r"(?m)^\s*\[[^\]]+\]:\s*(\S+)", content)
+    return tuple([*inline, *references])
+
+
+def contains_parent_reference(target: str) -> bool:
+    target = target.strip().strip("<>").split("#", 1)[0].split("?", 1)[0]
+    if not target or "://" in target or target.startswith("mailto:"):
+        return False
+    return (
+        ".." in PurePosixPath(target.replace("\\", "/")).parts
+        or ".." in PureWindowsPath(target).parts
+    )
+
+
+def exact_regular_file(root: Path, relative: Path) -> bool:
+    current = root
+    for index, component in enumerate(relative.parts):
+        try:
+            child = next(child for child in current.iterdir() if child.name == component)
+        except (OSError, StopIteration):
+            return False
+        if child.is_symlink():
+            return False
+        if index == len(relative.parts) - 1:
+            return child.is_file()
+        if not child.is_dir():
+            return False
+        current = child
+    return False
+
+
+def contained(path: Path, resolved_root: Path) -> bool:
+    try:
+        return path.resolve().is_relative_to(resolved_root)
+    except OSError:
+        return False
 
 
 def main(argv: list[str] | None = None) -> int:

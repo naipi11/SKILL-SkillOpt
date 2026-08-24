@@ -60,3 +60,44 @@ network access, host CLIs, user scripts, or subprocesses. Installation and root
 plugin manifests, skills, and documentation remain untouched. As required, the
 repository root is intentionally not yet a valid package; Task 6 supplies its
 required manifests and Skill files.
+
+## Repair evidence — validator portability and strict parsing
+
+- Preserved the interrupted TDD additions in `tests/test_validation.py` and
+  `tests/test_bundle_apply.py`. Before the repair,
+  `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -q`
+  reported 12 failures: malformed or quoted frontmatter handling, external
+  symlink reads, optional root metadata, packaged-resource loading,
+  case-sensitive required paths, reference-style Markdown links, deterministic
+  walk ordering, and generated escaped descriptions.
+- The frontmatter parser now accepts only one-line unquoted plain scalars,
+  complete JSON double-quoted strings, or YAML single-quoted strings with
+  doubled apostrophes. It rejects malformed, multiline, block, and collection
+  values.
+- Validation now records escaping symlinks without reading their contents,
+  uses exact directory-entry names for required files on case-insensitive
+  filesystems, sorts `os.walk` directory and filename lists in place, and
+  checks inline plus reference-style Markdown targets.
+- The root manifest uses the closed Agent Plugins v1 field set with type checks
+  for `author`, `homepage`, `repository`, `license`, `keywords`, and
+  `extensions`. Optional `repository` and `license` are retained in root
+  identity comparison.
+- The standalone validator is now a package asset at
+  `src/agent_skillopt/assets/validate_bundle.py`, read with
+  `importlib.resources`. The identical self-contained file is used by the root
+  test wrapper, fixture, and generated bundles; it imports no project package.
+  Package data includes this asset for installed distributions.
+
+## Repair verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -q` —
+  32 passed.
+- `python -m pytest tests -v` — 44 passed.
+- `python -m compileall src` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `git diff --check` — passed.

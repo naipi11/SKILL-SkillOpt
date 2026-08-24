@@ -34,6 +34,21 @@ _REQUIRED_FILES = (
     Path("tests/validate_bundle.py"),
 )
 _UNFINISHED_MARKERS = ("TODO", "TBD", "<skill-name>")
+_ROOT_FIELDS = frozenset(
+    {
+        "$schema",
+        "name",
+        "version",
+        "description",
+        "author",
+        "homepage",
+        "repository",
+        "license",
+        "keywords",
+        "extensions",
+    }
+)
+_AUTHOR_FIELDS = frozenset({"name", "email", "url"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,8 +76,8 @@ def validate_bundle(root: Path) -> tuple[ValidationIssue, ...]:
         return (_issue("BUNDLE_ROOT_INVALID", bundle_root, "bundle root must be a directory"),)
 
     resolved_root = bundle_root.resolve()
-    _validate_containment(bundle_root, resolved_root, issues)
-    required = _validate_required_files(bundle_root, issues)
+    unsafe_paths = _validate_containment(bundle_root, resolved_root, issues)
+    required = _validate_required_files(bundle_root, unsafe_paths, issues)
     root_manifest = (
         _load_manifest(bundle_root / "plugin.json", issues)
         if required[Path("plugin.json")]
@@ -83,7 +98,7 @@ def validate_bundle(root: Path) -> tuple[ValidationIssue, ...]:
             _validate_host_manifest(bundle_root / path, manifest, root_identity, issues)
         for path, manifest in marketplace_manifests.items():
             _validate_marketplace(bundle_root / path, manifest, root_identity["name"], issues)
-        _validate_skill_tree(bundle_root, root_identity, issues)
+        _validate_skill_tree(bundle_root, resolved_root, unsafe_paths, root_identity, issues)
     return tuple(issues)
 
 
@@ -98,28 +113,37 @@ def _issue(code: str, path: Path, message: str) -> ValidationIssue:
     return ValidationIssue(code=code, path=path, message=message)
 
 
-def _validate_containment(root: Path, resolved_root: Path, issues: list[ValidationIssue]) -> None:
+def _validate_containment(
+    root: Path, resolved_root: Path, issues: list[ValidationIssue]
+) -> set[Path]:
+    unsafe_paths: set[Path] = set()
     for directory, directories, filenames in os.walk(root, followlinks=False):
         current = Path(directory)
-        for name in sorted([*directories, *filenames]):
+        directories.sort()
+        filenames.sort()
+        for name in [*directories, *filenames]:
             candidate = current / name
-            try:
-                contained = candidate.resolve().is_relative_to(resolved_root)
-            except OSError:
-                contained = False
-            if not contained:
+            if not _is_contained(candidate, resolved_root):
+                unsafe_paths.add(candidate)
                 issues.append(
                     _issue(
                         "PATH_OUTSIDE_BUNDLE", candidate, "resolved path escapes the bundle root"
                     )
                 )
+    return unsafe_paths
 
 
-def _validate_required_files(root: Path, issues: list[ValidationIssue]) -> dict[Path, bool]:
+def _validate_required_files(
+    root: Path, unsafe_paths: set[Path], issues: list[ValidationIssue]
+) -> dict[Path, bool]:
     found: dict[Path, bool] = {}
     for relative_path in _REQUIRED_FILES:
         path = root / relative_path
-        is_file = path.is_file()
+        is_file = (
+            _has_exact_regular_file(root, relative_path)
+            and path not in unsafe_paths
+            and _is_contained(path, root.resolve())
+        )
         found[relative_path] = is_file
         if not is_file:
             issues.append(_issue("REQUIRED_FILE_MISSING", path, "required bundle file is missing"))
@@ -143,10 +167,59 @@ def _validate_root_manifest(
 ) -> dict[str, str] | None:
     if manifest is None:
         return None
+    _validate_root_fields(path, manifest, issues)
     if manifest.get("$schema") != _SCHEMA_URL:
         issues.append(_issue("MANIFEST_SCHEMA_INVALID", path, "manifest schema URL is invalid"))
     identity = _required_identity(path, manifest, issues)
+    if identity is not None:
+        for field in ("repository", "license"):
+            value = manifest.get(field)
+            if isinstance(value, str):
+                identity[field] = value
     return identity
+
+
+def _validate_root_fields(
+    path: Path, manifest: dict[str, object], issues: list[ValidationIssue]
+) -> None:
+    for field in sorted(set(manifest) - _ROOT_FIELDS):
+        issues.append(
+            _issue("ROOT_MANIFEST_UNKNOWN_FIELD", path, f"{field} is not an Agent Plugins v1 field")
+        )
+    for field in ("homepage", "repository", "license"):
+        if field in manifest and not isinstance(manifest[field], str):
+            issues.append(
+                _issue("ROOT_MANIFEST_OPTIONAL_TYPE_INVALID", path, f"{field} must be text")
+            )
+    if "keywords" in manifest and (
+        not isinstance(manifest["keywords"], list)
+        or not all(isinstance(keyword, str) for keyword in manifest["keywords"])
+    ):
+        issues.append(
+            _issue("ROOT_MANIFEST_OPTIONAL_TYPE_INVALID", path, "keywords must be a list of text")
+        )
+    if "author" in manifest:
+        author = manifest["author"]
+        if not isinstance(author, dict) or any(
+            field not in _AUTHOR_FIELDS or not isinstance(value, str)
+            for field, value in author.items()
+        ):
+            issues.append(
+                _issue(
+                    "ROOT_MANIFEST_OPTIONAL_TYPE_INVALID", path, "author must be a text-only object"
+                )
+            )
+    if "extensions" in manifest and (
+        not isinstance(manifest["extensions"], dict)
+        or not all(isinstance(value, dict) for value in manifest["extensions"].values())
+    ):
+        issues.append(
+            _issue(
+                "ROOT_MANIFEST_OPTIONAL_TYPE_INVALID",
+                path,
+                "extensions must be an object of objects",
+            )
+        )
 
 
 def _required_identity(
@@ -237,14 +310,24 @@ def _validate_marketplace(
 
 
 def _validate_skill_tree(
-    root: Path, identity: dict[str, str], issues: list[ValidationIssue]
+    root: Path,
+    resolved_root: Path,
+    unsafe_paths: set[Path],
+    identity: dict[str, str],
+    issues: list[ValidationIssue],
 ) -> None:
     skills_directory = root / "skills"
+    if skills_directory in unsafe_paths or not _is_contained(skills_directory, resolved_root):
+        return
     try:
         children = sorted(skills_directory.iterdir(), key=lambda child: child.name)
     except OSError:
         children = []
-    skill_directories = [child for child in children if child.is_dir()]
+    skill_directories = [
+        child
+        for child in children
+        if child.is_dir() and child not in unsafe_paths and _is_contained(child, resolved_root)
+    ]
     if len(skill_directories) != 1:
         issues.append(
             _issue(
@@ -260,7 +343,9 @@ def _validate_skill_tree(
             _issue("SKILL_NAME_MISMATCH", skill_directory, "Skill directory must match plugin name")
         )
     skill_file = skill_directory / "SKILL.md"
-    if not skill_file.is_file():
+    if skill_file in unsafe_paths or not _is_contained(skill_file, resolved_root):
+        return
+    if not _has_exact_regular_file(skill_directory, Path("SKILL.md")):
         issues.append(_issue("SKILL_FILE_MISSING", skill_file, "SKILL.md is required"))
         return
     _validate_skill_file(skill_file, identity, issues)
@@ -316,14 +401,68 @@ def _parse_frontmatter(content: str) -> dict[str, str] | None:
         if ":" not in line:
             return None
         key, value = line.split(":", 1)
-        if key not in {"name", "description"} or key in fields or not value.strip():
+        if key not in {"name", "description"} or key in fields:
             return None
-        fields[key] = value.strip().strip('"')
+        scalar = _parse_frontmatter_scalar(value)
+        if scalar is None:
+            return None
+        fields[key] = scalar
     return fields if set(fields) == {"name", "description"} else None
 
 
+def _parse_frontmatter_scalar(value: str) -> str | None:
+    """Accept only the one-line scalar subset emitted by portable bundles."""
+    if not value.startswith(" ") or value != value.rstrip() or "\t" in value:
+        return None
+    scalar = value[1:]
+    if not scalar:
+        return None
+    if scalar.startswith('"'):
+        try:
+            decoded = json.loads(scalar)
+        except json.JSONDecodeError:
+            return None
+        return decoded if isinstance(decoded, str) and decoded else None
+    if scalar.startswith("'"):
+        if not scalar.endswith("'") or len(scalar) < 2:
+            return None
+        inner = scalar[1:-1]
+        if "'" in inner.replace("''", ""):
+            return None
+        return inner.replace("''", "'") or None
+    if scalar[0] in "[{|>&*!#" or " #" in scalar or ": " in scalar:
+        return None
+    return scalar
+
+
 def _markdown_targets(content: str) -> tuple[str, ...]:
-    return tuple(re.findall(r"!?\[[^\]]*\]\(([^)]+)\)", content))
+    inline = re.findall(r"!?\[[^\]]*\]\(([^)]+)\)", content)
+    references = re.findall(r"(?m)^\s*\[[^\]]+\]:\s*(\S+)", content)
+    return tuple([*inline, *references])
+
+
+def _has_exact_regular_file(root: Path, relative_path: Path) -> bool:
+    current = root
+    for index, component in enumerate(relative_path.parts):
+        try:
+            child = next(child for child in current.iterdir() if child.name == component)
+        except (OSError, StopIteration):
+            return False
+        if child.is_symlink():
+            return False
+        if index == len(relative_path.parts) - 1:
+            return child.is_file()
+        if not child.is_dir():
+            return False
+        current = child
+    return False
+
+
+def _is_contained(path: Path, resolved_root: Path) -> bool:
+    try:
+        return path.resolve().is_relative_to(resolved_root)
+    except OSError:
+        return False
 
 
 def _contains_parent_reference(target: str) -> bool:

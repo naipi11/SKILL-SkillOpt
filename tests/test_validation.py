@@ -1,11 +1,14 @@
 import json
 import subprocess
 import sys
+from importlib import resources
 from pathlib import Path
 
 import pytest
 
+from agent_skillopt import bundle
 from agent_skillopt.cli import main
+from agent_skillopt.models import SkillSpec
 from agent_skillopt.validation import BundleValidationError, assert_valid_bundle, validate_bundle
 
 
@@ -119,3 +122,175 @@ def test_root_validation_wrapper_uses_the_current_checkout(
 
     assert result.returncode == 0
     assert result.stdout == "VALID\n"
+
+
+def test_validator_decodes_json_escaped_frontmatter_description(minimal_bundle: Path):
+    description = 'Quoted "text", a backslash \\, and a newline\\nmarker.'
+    manifest = minimal_bundle / "plugin.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["description"] = description
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+    for host_manifest in (
+        minimal_bundle / ".codex-plugin" / "plugin.json",
+        minimal_bundle / ".claude-plugin" / "plugin.json",
+    ):
+        host = json.loads(host_manifest.read_text(encoding="utf-8"))
+        host["description"] = description
+        host_manifest.write_text(json.dumps(host), encoding="utf-8")
+    (minimal_bundle / "skills" / "minimal-skill" / "SKILL.md").write_text(
+        "---\nname: minimal-skill\ndescription: " + json.dumps(description) + "\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    assert validate_bundle(minimal_bundle) == ()
+
+
+def test_validator_rejects_an_unterminated_json_frontmatter_string(minimal_bundle: Path):
+    skill = minimal_bundle / "skills" / "minimal-skill" / "SKILL.md"
+    skill.write_text(
+        '---\nname: minimal-skill\ndescription: "Valid description.\n---\nbody\n',
+        encoding="utf-8",
+    )
+
+    assert "SKILL_FRONTMATTER_INVALID" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+def test_validator_decodes_yaml_single_quoted_frontmatter_description(minimal_bundle: Path):
+    description = "A single ' quote."
+    manifest = minimal_bundle / "plugin.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["description"] = description
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+    for host_manifest in (
+        minimal_bundle / ".codex-plugin" / "plugin.json",
+        minimal_bundle / ".claude-plugin" / "plugin.json",
+    ):
+        host = json.loads(host_manifest.read_text(encoding="utf-8"))
+        host["description"] = description
+        host_manifest.write_text(json.dumps(host), encoding="utf-8")
+    (minimal_bundle / "skills" / "minimal-skill" / "SKILL.md").write_text(
+        "---\nname: minimal-skill\ndescription: 'A single '' quote.'\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    assert validate_bundle(minimal_bundle) == ()
+
+
+def test_validator_does_not_read_an_outside_skill_symlink(minimal_bundle: Path, tmp_path: Path):
+    skill = minimal_bundle / "skills" / "minimal-skill" / "SKILL.md"
+    outside = tmp_path / "outside.md"
+    outside.write_text(
+        "---\nname: minimal-skill\ndescription: Outside description.\n---\nbody\n",
+        encoding="utf-8",
+    )
+    skill.unlink()
+    try:
+        skill.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this host")
+
+    codes = {issue.code for issue in validate_bundle(minimal_bundle)}
+
+    assert codes == {"PATH_OUTSIDE_BUNDLE"}
+
+
+def test_validator_rejects_unknown_root_manifest_field(minimal_bundle: Path):
+    manifest = minimal_bundle / "plugin.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["unexpected"] = True
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+
+    assert "ROOT_MANIFEST_UNKNOWN_FIELD" in {
+        issue.code for issue in validate_bundle(minimal_bundle)
+    }
+
+
+def test_validator_rejects_wrong_optional_root_manifest_type(minimal_bundle: Path):
+    manifest = minimal_bundle / "plugin.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["keywords"] = "not-an-array"
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+
+    assert "ROOT_MANIFEST_OPTIONAL_TYPE_INVALID" in {
+        issue.code for issue in validate_bundle(minimal_bundle)
+    }
+
+
+def test_validator_accepts_matching_optional_repository_and_license_metadata(minimal_bundle: Path):
+    root_manifest = minimal_bundle / "plugin.json"
+    root = json.loads(root_manifest.read_text(encoding="utf-8"))
+    root.update({"repository": "https://example.test/minimal", "license": "MIT"})
+    root_manifest.write_text(json.dumps(root), encoding="utf-8")
+    for host_manifest in (
+        minimal_bundle / ".codex-plugin" / "plugin.json",
+        minimal_bundle / ".claude-plugin" / "plugin.json",
+    ):
+        host = json.loads(host_manifest.read_text(encoding="utf-8"))
+        host.update({"repository": "https://example.test/minimal", "license": "MIT"})
+        host_manifest.write_text(json.dumps(host), encoding="utf-8")
+
+    assert validate_bundle(minimal_bundle) == ()
+
+
+def test_build_plan_loads_the_validator_from_packaged_resources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(bundle, "_PORTABLE_VALIDATOR_PATH", tmp_path / "missing.py", raising=False)
+    specification = SkillSpec.from_json(
+        json.dumps(
+            {
+                "name": "minimal-skill",
+                "description": "Valid description.",
+                "body": "body",
+                "output_directory": str(tmp_path / "bundle"),
+            }
+        )
+    )
+
+    validator = next(
+        file.content
+        for file in bundle.build_plan(specification).files
+        if file.relative_path.as_posix() == "tests/validate_bundle.py"
+    )
+
+    assert validator == (
+        resources.files("agent_skillopt")
+        .joinpath("assets/validate_bundle.py")
+        .read_text(encoding="utf-8")
+    )
+    assert "agent_skillopt" not in validator
+
+
+def test_validator_rejects_case_mismatched_required_manifest_name(minimal_bundle: Path):
+    manifest = minimal_bundle / ".codex-plugin" / "plugin.json"
+    manifest.rename(manifest.with_name("Plugin.json"))
+
+    assert "REQUIRED_FILE_MISSING" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+def test_validator_rejects_reference_style_markdown_path_traversal(minimal_bundle: Path):
+    skill = minimal_bundle / "skills" / "minimal-skill" / "SKILL.md"
+    skill.write_text(
+        "---\nname: minimal-skill\ndescription: Valid description.\n---\n"
+        "Read [secret][reference].\n\n[reference]: ../secret.md\n",
+        encoding="utf-8",
+    )
+
+    assert "SKILL_PATH_TRAVERSAL" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+def test_validator_sorts_os_walk_directory_names_in_place(
+    minimal_bundle: Path, monkeypatch: pytest.MonkeyPatch
+):
+    directories = ["z", "a"]
+    filenames = ["z.md", "a.md"]
+
+    def unordered_walk(root: Path, followlinks: bool):
+        yield str(root), directories, filenames
+
+    monkeypatch.setattr("agent_skillopt.validation.os.walk", unordered_walk)
+
+    validate_bundle(minimal_bundle)
+
+    assert directories == ["a", "z"]
+    assert filenames == ["a.md", "z.md"]

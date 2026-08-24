@@ -76,6 +76,25 @@ def test_apply_refuses_to_publish_a_staging_bundle_that_fails_formal_validation(
     assert sample_spec.output_directory.exists() is False
 
 
+def test_apply_accepts_generated_json_escaped_frontmatter_description(tmp_path: Path):
+    description = 'Quoted "text", a backslash \\, and a newline\\nmarker.'
+    specification = SkillSpec.from_json(
+        json.dumps(
+            {
+                "name": "release-notes",
+                "description": description,
+                "body": "Collect verified changes before drafting the release notes.",
+                "output_directory": str(tmp_path / "release-notes"),
+            }
+        )
+    )
+    plan = build_plan(specification)
+
+    apply_plan(plan, plan.confirmation_token)
+
+    assert specification.output_directory.is_dir()
+
+
 def test_apply_preserves_a_dangling_final_target_link(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
