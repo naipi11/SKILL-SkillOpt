@@ -21,9 +21,13 @@ def test_codex_and_claude_manifests_share_identity(project_root):
     assert codex["license"] == claude["license"] == "MIT"
 
 
-def test_portable_package_has_no_native_openclaw_or_hermes_adapter(project_root):
-    assert not (project_root / "openclaw.plugin.json").exists()
-    assert not (project_root / "plugin.yaml").exists()
+def test_installed_skill_uses_its_own_absolute_directory_for_wrapper_invocation(project_root):
+    skill = project_root / "skills" / "agent-skillopt" / "SKILL.md"
+    content = skill.read_text(encoding="utf-8")
+
+    assert "python skills/agent-skillopt/scripts/scaffold_bundle.py" not in content
+    assert "当前正在阅读的 SKILL.md 的绝对路径" in content
+    assert "<absolute-SKILL-directory>/scripts/scaffold_bundle.py" in content
 
 
 def test_scaffolder_wrapper_forwards_help_without_writing(project_root, tmp_path):
@@ -39,3 +43,66 @@ def test_scaffolder_wrapper_forwards_help_without_writing(project_root, tmp_path
     assert result.returncode == 0
     assert "preview" in result.stdout
     assert list(tmp_path.iterdir()) == []
+
+
+def test_scaffolder_wrapper_overrides_a_preloaded_external_package(project_root, tmp_path):
+    wrapper = project_root / "skills" / "agent-skillopt" / "scripts" / "scaffold_bundle.py"
+    stale_package = tmp_path / "stale" / "agent_skillopt"
+    stale_package.mkdir(parents=True)
+    (stale_package / "__init__.py").write_text("", encoding="utf-8")
+    (stale_package / "cli.py").write_text(
+        "def main():\n    print('STALE_AGENT_SKILLOPT')\n    return 0\n",
+        encoding="utf-8",
+    )
+    command = "\n".join(
+        (
+            "import runpy",
+            "import sys",
+            f"sys.path.insert(0, {str(stale_package.parent)!r})",
+            "import agent_skillopt.cli",
+            f"sys.path.append({str(project_root / 'src')!r})",
+            f"runpy.run_path({str(wrapper)!r}, run_name='__main__')",
+        )
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", command, "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "preview" in result.stdout
+    assert "STALE_AGENT_SKILLOPT" not in result.stdout
+
+
+def test_scaffolder_wrapper_discards_preloaded_modules_without_an_origin(project_root, tmp_path):
+    wrapper = project_root / "skills" / "agent-skillopt" / "scripts" / "scaffold_bundle.py"
+    command = "\n".join(
+        (
+            "import runpy",
+            "import sys",
+            "import types",
+            "package = types.ModuleType('agent_skillopt')",
+            "cli = types.ModuleType('agent_skillopt.cli')",
+            "cli.main = lambda: (print('ORIGINLESS_STALE_AGENT_SKILLOPT') or 0)",
+            "sys.modules['agent_skillopt'] = package",
+            "sys.modules['agent_skillopt.cli'] = cli",
+            f"sys.path.append({str(project_root / 'src')!r})",
+            f"runpy.run_path({str(wrapper)!r}, run_name='__main__')",
+        )
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", command, "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "preview" in result.stdout
+    assert "ORIGINLESS_STALE_AGENT_SKILLOPT" not in result.stdout

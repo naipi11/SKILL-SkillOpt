@@ -24,10 +24,12 @@ description: Create review-gated portable Skill packages for coding agents.
 
 ## 预览、确认与创建
 
-将完整 JSON 规格通过标准输入交给本 Skill 的确定性包装器；不要将规格写成临时文件：
+先解析当前正在阅读的 SKILL.md 的绝对路径，并令 `SKILL_DIRECTORY` 为该文件所在的绝对
+目录。不要假定仓库检出目录、当前工作目录或任一宿主的安装路径。将完整 JSON 规格通过
+标准输入交给紧邻当前 Skill 的确定性包装器；不要将规格写成临时文件：
 
 ```text
-<JSON specification> | python skills/agent-skillopt/scripts/scaffold_bundle.py preview --spec -
+<JSON specification> | python <absolute-SKILL-directory>/scripts/scaffold_bundle.py preview --spec -
 ```
 
 展示预览返回的输出目录、全部文件、每项可选资源及确认令牌。随后立即停止，等待用户对该
@@ -36,8 +38,8 @@ description: Create review-gated portable Skill packages for coding agents.
 批准后，使用同一份完整 JSON 规格和预览返回的完全一致令牌：
 
 ```text
-<JSON specification> | python skills/agent-skillopt/scripts/scaffold_bundle.py apply --spec - --confirm <preview-token>
-python skills/agent-skillopt/scripts/scaffold_bundle.py validate --path <created-bundle>
+<JSON specification> | python <absolute-SKILL-directory>/scripts/scaffold_bundle.py apply --spec - --confirm <preview-token>
+python <absolute-SKILL-directory>/scripts/scaffold_bundle.py validate --path <created-bundle>
 ```
 
 令牌缺失、过期、规格或目标目录改变时，重新预览。确定性脚手架不可用时，报告该限制；
@@ -48,7 +50,7 @@ python skills/agent-skillopt/scripts/scaffold_bundle.py validate --path <created
 离线验证成功后，询问用户选择一个宿主，并仅渲染该宿主的安装计划：
 
 ```text
-python skills/agent-skillopt/scripts/scaffold_bundle.py install --host <codex|claude|hermes|openclaw> --path <created-bundle>
+python <absolute-SKILL-directory>/scripts/scaffold_bundle.py install --host <codex|claude|hermes|openclaw> --path <created-bundle>
 ```
 
 说明渲染出的命令和网络边界，参考 [host-installation](references/host-installation.md)。

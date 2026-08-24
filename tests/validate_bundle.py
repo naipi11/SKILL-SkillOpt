@@ -51,6 +51,32 @@ OPTIONAL_METADATA_FIELDS = (
     "extensions",
 )
 REMOTE_LINK_SCHEMES = frozenset({"ftp", "ftps", "git", "http", "https", "ssh"})
+FORBIDDEN_ROOT_RUNTIME_SURFACES = {
+    "openclaw.plugin.json": (
+        "ROOT_NATIVE_OPENCLAW_FORBIDDEN",
+        "native OpenClaw runtime manifest is prohibited in a portable v1 bundle",
+    ),
+    "plugin.yaml": (
+        "ROOT_NATIVE_HERMES_FORBIDDEN",
+        "native Hermes manifest is prohibited in a portable v1 bundle",
+    ),
+    ".mcp.json": (
+        "ROOT_MCP_CONFIGURATION_FORBIDDEN",
+        "root MCP configuration is prohibited in a portable v1 bundle",
+    ),
+    "mcp.json": (
+        "ROOT_MCP_CONFIGURATION_FORBIDDEN",
+        "root MCP configuration is prohibited in a portable v1 bundle",
+    ),
+    "hooks": (
+        "ROOT_HOOK_SURFACE_FORBIDDEN",
+        "root hook surface is prohibited in a portable v1 bundle",
+    ),
+    "hooks.json": (
+        "ROOT_HOOK_SURFACE_FORBIDDEN",
+        "root hook surface is prohibited in a portable v1 bundle",
+    ),
+}
 PERCENT_NORMALIZATION_LIMIT = 8
 FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 UNFINISHED = ("TODO", "TBD", "<skill-name>")
@@ -89,6 +115,7 @@ def validate(root: Path) -> list[tuple[str, Path, str]]:
         return [("BUNDLE_ROOT_INVALID", root, "bundle root must be a directory")]
     resolved_root = root.resolve()
     unsafe = validate_containment(root, resolved_root, issues)
+    validate_forbidden_root_runtime_surfaces(root, issues)
     present = validate_required(root, resolved_root, unsafe, issues)
     root_manifest = load(root / "plugin.json", issues) if present[Path("plugin.json")] else None
     identity = root_identity(root / "plugin.json", root_manifest, issues)
@@ -123,6 +150,21 @@ def validate_containment(
             if not contained(path, resolved_root):
                 record_outside_path(path, unsafe, issues)
     return unsafe
+
+
+def validate_forbidden_root_runtime_surfaces(
+    root: Path, issues: list[tuple[str, Path, str]]
+) -> None:
+    """Reject approved root-only native runtime surfaces without restricting Skill resources."""
+    try:
+        entries = sorted(root.iterdir(), key=lambda entry: (entry.name.casefold(), entry.name))
+    except OSError:
+        return
+    for entry in entries:
+        surface = FORBIDDEN_ROOT_RUNTIME_SURFACES.get(entry.name.casefold())
+        if surface is not None:
+            code, message = surface
+            issues.append((code, entry, message))
 
 
 def validate_required(

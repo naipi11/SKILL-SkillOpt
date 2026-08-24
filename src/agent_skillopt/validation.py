@@ -60,6 +60,32 @@ _OPTIONAL_METADATA_FIELDS = (
     "extensions",
 )
 _REMOTE_LINK_SCHEMES = frozenset({"ftp", "ftps", "git", "http", "https", "ssh"})
+_FORBIDDEN_ROOT_RUNTIME_SURFACES = {
+    "openclaw.plugin.json": (
+        "ROOT_NATIVE_OPENCLAW_FORBIDDEN",
+        "native OpenClaw runtime manifest is prohibited in a portable v1 bundle",
+    ),
+    "plugin.yaml": (
+        "ROOT_NATIVE_HERMES_FORBIDDEN",
+        "native Hermes manifest is prohibited in a portable v1 bundle",
+    ),
+    ".mcp.json": (
+        "ROOT_MCP_CONFIGURATION_FORBIDDEN",
+        "root MCP configuration is prohibited in a portable v1 bundle",
+    ),
+    "mcp.json": (
+        "ROOT_MCP_CONFIGURATION_FORBIDDEN",
+        "root MCP configuration is prohibited in a portable v1 bundle",
+    ),
+    "hooks": (
+        "ROOT_HOOK_SURFACE_FORBIDDEN",
+        "root hook surface is prohibited in a portable v1 bundle",
+    ),
+    "hooks.json": (
+        "ROOT_HOOK_SURFACE_FORBIDDEN",
+        "root hook surface is prohibited in a portable v1 bundle",
+    ),
+}
 _PERCENT_NORMALIZATION_LIMIT = 8
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 
@@ -116,6 +142,7 @@ def validate_bundle(root: Path) -> tuple[ValidationIssue, ...]:
 
     resolved_root = bundle_root.resolve()
     unsafe_paths = _validate_containment(bundle_root, resolved_root, issues)
+    _validate_forbidden_root_runtime_surfaces(bundle_root, issues)
     required = _validate_required_files(bundle_root, unsafe_paths, issues)
     root_manifest = (
         _load_manifest(bundle_root / "plugin.json", issues)
@@ -173,6 +200,19 @@ def _validate_containment(
             if not _is_contained(candidate, resolved_root):
                 _record_outside_path(candidate, unsafe_paths, issues)
     return unsafe_paths
+
+
+def _validate_forbidden_root_runtime_surfaces(root: Path, issues: list[ValidationIssue]) -> None:
+    """Reject approved root-only native runtime surfaces without restricting Skill resources."""
+    try:
+        entries = sorted(root.iterdir(), key=lambda entry: (entry.name.casefold(), entry.name))
+    except OSError:
+        return
+    for entry in entries:
+        surface = _FORBIDDEN_ROOT_RUNTIME_SURFACES.get(entry.name.casefold())
+        if surface is not None:
+            code, message = surface
+            issues.append(_issue(code, entry, message))
 
 
 def _validate_required_files(

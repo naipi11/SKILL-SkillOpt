@@ -264,11 +264,47 @@ def test_build_plan_loads_the_validator_from_packaged_resources(
     assert "agent_skillopt" not in validator
 
 
+def test_standalone_validator_copies_match_the_packaged_asset(project_root: Path):
+    asset = (
+        project_root / "src" / "agent_skillopt" / "assets" / "validate_bundle.py"
+    ).read_text(encoding="utf-8")
+
+    assert (project_root / "tests" / "validate_bundle.py").read_text(encoding="utf-8") == asset
+    assert (
+        project_root / "tests" / "fixtures" / "minimal-skill" / "tests" / "validate_bundle.py"
+    ).read_text(encoding="utf-8") == asset
+
+
 def test_validator_rejects_case_mismatched_required_manifest_name(minimal_bundle: Path):
     manifest = minimal_bundle / ".codex-plugin" / "plugin.json"
     manifest.rename(manifest.with_name("Plugin.json"))
 
     assert "REQUIRED_FILE_MISSING" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "expected_code"),
+    (
+        ("openclaw.plugin.json", "ROOT_NATIVE_OPENCLAW_FORBIDDEN"),
+        ("OPENCLAW.PLUGIN.JSON", "ROOT_NATIVE_OPENCLAW_FORBIDDEN"),
+        ("plugin.yaml", "ROOT_NATIVE_HERMES_FORBIDDEN"),
+        ("PLUGIN.YAML", "ROOT_NATIVE_HERMES_FORBIDDEN"),
+        ("mcp.json", "ROOT_MCP_CONFIGURATION_FORBIDDEN"),
+        (".MCP.JSON", "ROOT_MCP_CONFIGURATION_FORBIDDEN"),
+        ("hooks.json", "ROOT_HOOK_SURFACE_FORBIDDEN"),
+        ("HOOKS", "ROOT_HOOK_SURFACE_FORBIDDEN"),
+    ),
+)
+def test_validator_rejects_prohibited_root_runtime_surfaces(
+    minimal_bundle: Path, relative_path: str, expected_code: str
+):
+    surface = minimal_bundle / relative_path
+    if relative_path.casefold() == "hooks":
+        surface.mkdir()
+    else:
+        surface.write_text("{}\n", encoding="utf-8")
+
+    assert expected_code in {issue.code for issue in validate_bundle(minimal_bundle)}
 
 
 def test_validator_rejects_reference_style_markdown_path_traversal(minimal_bundle: Path):
