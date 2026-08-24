@@ -91,27 +91,29 @@ def apply_plan(plan: BundlePlan, confirmation_token: str) -> tuple[Path, ...]:
     if confirmation_token != plan.confirmation_token:
         raise ConfirmationError("confirmation token is missing or stale.")
 
-    raw_target = plan.output_directory
-    _raise_if_target_exists(raw_target)
-    target = raw_target.resolve()
-    parent = target.parent.resolve()
-    _assert_writable_parent(parent)
+    raw_target = plan.output_directory.absolute()
+    resolved_parent = raw_target.parent.resolve()
+    final_target = resolved_parent / raw_target.name
+    _raise_if_target_exists(final_target)
+    _assert_writable_parent(resolved_parent)
 
     staging_directory: Path | None = None
     try:
         staging_directory = Path(
-            tempfile.mkdtemp(prefix=f".{target.name}.staging-", dir=parent)
+            tempfile.mkdtemp(prefix=f".{final_target.name}.staging-", dir=resolved_parent)
         )
         staging_directory = staging_directory.resolve()
         _write_staged_files(staging_directory, plan.files)
         _assert_staged_file_presence(staging_directory, plan.files)
-        _publish_staging_no_clobber(staging_directory, target)
+        _publish_staging_no_clobber(staging_directory, final_target)
     except BaseException:
         if staging_directory is not None:
             _remove_staging_directory(staging_directory)
         raise
 
-    return tuple(target / Path(*planned_file.relative_path.parts) for planned_file in plan.files)
+    return tuple(
+        final_target / Path(*planned_file.relative_path.parts) for planned_file in plan.files
+    )
 
 
 def _planned_json(path: str, content: dict[str, object], purpose: str) -> PlannedFile:

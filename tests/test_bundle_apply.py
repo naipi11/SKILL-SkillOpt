@@ -103,6 +103,34 @@ def test_apply_preserves_a_dangling_final_target_link(
         assert raw_target.exists() is False
 
 
+def test_apply_refuses_a_dangling_link_created_after_the_initial_conflict_check(
+    monkeypatch: pytest.MonkeyPatch, sample_spec: SkillSpec
+):
+    raw_target = sample_spec.output_directory
+    missing_destination = raw_target.parent / "missing-destination"
+    lexists = bundle._path_lexists
+    first_check = True
+
+    def create_link_after_initial_check(path: Path) -> bool:
+        nonlocal first_check
+        exists = lexists(path)
+        if first_check:
+            first_check = False
+            assert exists is False
+            raw_target.symlink_to(missing_destination, target_is_directory=True)
+        return exists
+
+    monkeypatch.setattr(bundle, "_path_lexists", create_link_after_initial_check)
+    plan = build_plan(sample_spec)
+
+    with pytest.raises(WriteConflictError):
+        apply_plan(plan, plan.confirmation_token)
+
+    assert os.path.lexists(raw_target)
+    assert raw_target.is_symlink()
+    assert missing_destination.exists() is False
+
+
 def test_apply_refuses_a_target_created_during_publication(
     monkeypatch: pytest.MonkeyPatch, sample_spec: SkillSpec
 ):
