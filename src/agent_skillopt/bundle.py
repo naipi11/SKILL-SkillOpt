@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import PurePosixPath
+import os
+import shutil
+import tempfile
+from pathlib import Path, PurePosixPath
 
-from agent_skillopt.errors import PlanError
+from agent_skillopt.errors import ConfirmationError, PlanError, WriteConflictError
 from agent_skillopt.models import BundlePlan, PlannedFile, ResourceSpec, SkillSpec
 
 _RESOURCE_DIRECTORIES = {"reference": "references", "script": "scripts", "asset": "assets"}
@@ -74,12 +77,69 @@ def render_preview(plan: BundlePlan) -> dict[str, object]:
     }
 
 
+def apply_plan(plan: BundlePlan, confirmation_token: str) -> tuple[Path, ...]:
+    """Atomically publish one rendered plan after exact user confirmation."""
+    if confirmation_token != plan.confirmation_token:
+        raise ConfirmationError("confirmation token is missing or stale.")
+
+    target = plan.output_directory.resolve()
+    _raise_if_target_exists(target)
+    parent = target.parent.resolve()
+    _assert_writable_parent(parent)
+
+    staging_directory: Path | None = None
+    try:
+        staging_directory = Path(
+            tempfile.mkdtemp(prefix=f".{target.name}.staging-", dir=parent)
+        ).resolve()
+        _write_staged_files(staging_directory, plan.files)
+        _assert_staged_file_presence(staging_directory, plan.files)
+        _raise_if_target_exists(target)
+        staging_directory.replace(target)
+    except Exception:
+        if staging_directory is not None:
+            shutil.rmtree(staging_directory, ignore_errors=True)
+        raise
+
+    return tuple(target / Path(*planned_file.relative_path.parts) for planned_file in plan.files)
+
+
 def _planned_json(path: str, content: dict[str, object], purpose: str) -> PlannedFile:
     return PlannedFile(
         relative_path=PurePosixPath(path),
         content=json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         purpose=purpose,
     )
+
+
+def _assert_writable_parent(parent: Path) -> None:
+    if not parent.is_dir() or not os.access(parent, os.W_OK):
+        raise PlanError("输出目录的父目录不存在或不可写。")
+
+
+def _raise_if_target_exists(target: Path) -> None:
+    if os.path.lexists(target):
+        raise WriteConflictError(target)
+
+
+def _write_staged_files(staging_root: Path, files: tuple[PlannedFile, ...]) -> None:
+    for planned_file in files:
+        destination = _staged_destination(staging_root, planned_file.relative_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(planned_file.content, encoding="utf-8")
+
+
+def _assert_staged_file_presence(staging_root: Path, files: tuple[PlannedFile, ...]) -> None:
+    for planned_file in files:
+        if not _staged_destination(staging_root, planned_file.relative_path).is_file():
+            raise PlanError("暂存的 Skill 包文件不完整。")
+
+
+def _staged_destination(staging_root: Path, relative_path: PurePosixPath) -> Path:
+    destination = (staging_root / Path(*relative_path.parts)).resolve()
+    if not destination.is_relative_to(staging_root):
+        raise PlanError("生成的文件路径不安全。")
+    return destination
 
 
 def _root_manifest(spec: SkillSpec) -> dict[str, object]:

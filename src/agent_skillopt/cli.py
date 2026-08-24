@@ -8,8 +8,13 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from agent_skillopt.bundle import build_plan, render_preview
-from agent_skillopt.errors import AgentSkillOptError, SpecError
+from agent_skillopt.bundle import apply_plan, build_plan, render_preview
+from agent_skillopt.errors import (
+    AgentSkillOptError,
+    ConfirmationError,
+    SpecError,
+    WriteConflictError,
+)
 from agent_skillopt.models import SkillSpec
 
 
@@ -41,6 +46,27 @@ def _preview_handler(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _apply_handler(arguments: argparse.Namespace) -> int:
+    """Create one package only after its recomputed preview token is confirmed."""
+    try:
+        specification = SkillSpec.from_json(_read_spec_argument(arguments.spec))
+        plan = build_plan(specification)
+        if arguments.confirm != plan.confirmation_token:
+            raise ConfirmationError("confirmation token is missing or stale.")
+        apply_plan(plan, arguments.confirm)
+    except ConfirmationError:
+        print("应用失败：确认令牌无效。", file=sys.stderr)
+        return 2
+    except WriteConflictError:
+        print("应用失败：输出目录已存在。", file=sys.stderr)
+        return 2
+    except AgentSkillOptError:
+        print("应用失败：规格无效。", file=sys.stderr)
+        return 2
+    print(f"已创建 Skill 包：{plan.output_directory}")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build the 0.2.0 command parser."""
     parser = argparse.ArgumentParser(
@@ -56,7 +82,7 @@ def _build_parser() -> argparse.ArgumentParser:
     apply = subcommands.add_parser("apply", help="在确认后创建四宿主 Skill 包。")
     apply.add_argument("--spec", required=True)
     apply.add_argument("--confirm", required=True)
-    apply.set_defaults(handler=_unavailable_handler)
+    apply.set_defaults(handler=_apply_handler)
 
     validate = subcommands.add_parser("validate", help="离线验证一个四宿主 Skill 包。")
     validate.add_argument("--path", type=Path, required=True)
