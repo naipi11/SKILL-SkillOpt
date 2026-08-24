@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import unquote, urlsplit
 
@@ -55,6 +56,13 @@ FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 UNFINISHED = ("TODO", "TBD", "<skill-name>")
 
 
+class LinkProbeResult(Enum):
+    SAFE = "safe"
+    LINK = "link"
+    MISSING = "missing"
+    ERROR = "error"
+
+
 def validate(root: Path) -> list[tuple[str, Path, str]]:
     root = Path(root)
     issues: list[tuple[str, Path, str]] = []
@@ -78,44 +86,37 @@ def validate(root: Path) -> list[tuple[str, Path, str]]:
 
 def validate_containment(
     root: Path, resolved_root: Path, issues: list[tuple[str, Path, str]]
-) -> set[Path]:
-    unsafe: set[Path] = set()
+) -> dict[Path, LinkProbeResult | None]:
+    unsafe: dict[Path, LinkProbeResult | None] = {}
     for directory, directories, filenames in os.walk(root, followlinks=False):
         directories.sort()
         filenames.sort()
         for name in [*directories, *filenames]:
             path = Path(directory) / name
-            if is_link_or_reparse_point(path):
-                unsafe.add(path)
+            probe = probe_link_or_reparse_point(path)
+            if probe in {LinkProbeResult.LINK, LinkProbeResult.ERROR}:
                 if name in directories:
                     directories.remove(name)
-                issues.append(
-                    (
-                        "PATH_OUTSIDE_BUNDLE",
-                        path,
-                        "links and reparse points are not accepted in a portable bundle",
-                    )
-                )
+                record_link_probe_rejection(path, probe, unsafe, issues)
+                continue
+            if probe is LinkProbeResult.MISSING:
                 continue
             if not contained(path, resolved_root):
-                unsafe.add(path)
-                issues.append(
-                    ("PATH_OUTSIDE_BUNDLE", path, "resolved path escapes the bundle root")
-                )
+                record_outside_path(path, unsafe, issues)
     return unsafe
 
 
 def validate_required(
     root: Path,
     resolved_root: Path,
-    unsafe: set[Path],
+    unsafe: dict[Path, LinkProbeResult | None],
     issues: list[tuple[str, Path, str]],
 ) -> dict[Path, bool]:
     present: dict[Path, bool] = {}
     for relative in REQUIRED:
         path = root / relative
         exists = (
-            exact_regular_file(root, relative)
+            exact_regular_file(root, relative, unsafe, issues)
             and path not in unsafe
             and contained(path, resolved_root)
         )
@@ -278,12 +279,26 @@ def marketplace(
 def skill_tree(
     root: Path,
     resolved_root: Path,
-    unsafe: set[Path],
+    unsafe: dict[Path, LinkProbeResult | None],
     identity: dict[str, object] | None,
     issues: list[tuple[str, Path, str]],
 ) -> None:
     skills = root / "skills"
-    if is_link_or_reparse_point(skills):
+    if skills in unsafe:
+        if unsafe[skills] is LinkProbeResult.LINK:
+            issues.append(
+                (
+                    "SKILL_DIRECTORY_COUNT_INVALID",
+                    skills,
+                    "canonical skills directory cannot be a link or reparse point",
+                )
+            )
+        return
+    probe = probe_link_or_reparse_point(skills)
+    if probe in {LinkProbeResult.LINK, LinkProbeResult.ERROR}:
+        record_link_probe_rejection(skills, probe, unsafe, issues)
+        if probe is LinkProbeResult.ERROR:
+            return
         issues.append(
             (
                 "SKILL_DIRECTORY_COUNT_INVALID",
@@ -292,11 +307,9 @@ def skill_tree(
             )
         )
         return
-    if skills in unsafe:
-        return
     if not contained(skills, resolved_root):
         return
-    if not exact_regular_directory(root, Path("skills")):
+    if not exact_regular_directory(root, Path("skills"), unsafe, issues):
         issues.append(
             (
                 "SKILL_DIRECTORY_COUNT_INVALID",
@@ -309,14 +322,18 @@ def skill_tree(
         children = sorted(skills.iterdir(), key=lambda child: child.name)
     except OSError:
         children = []
-    directories = [
-        child
-        for child in children
-        if not is_link_or_reparse_point(child)
-        and child.is_dir()
-        and child not in unsafe
-        and contained(child, resolved_root)
-    ]
+    directories: list[Path] = []
+    for child in children:
+        if child in unsafe:
+            continue
+        child_probe = probe_link_or_reparse_point(child)
+        if child_probe in {LinkProbeResult.LINK, LinkProbeResult.ERROR}:
+            record_link_probe_rejection(child, child_probe, unsafe, issues)
+            continue
+        if child_probe is LinkProbeResult.MISSING:
+            continue
+        if child.is_dir() and contained(child, resolved_root):
+            directories.append(child)
     if len(directories) != 1:
         issues.append(
             ("SKILL_DIRECTORY_COUNT_INVALID", skills, "exactly one Skill directory is required")
@@ -328,12 +345,17 @@ def skill_tree(
     skill = directory / "SKILL.md"
     if skill in unsafe:
         return
-    if is_link_or_reparse_point(skill):
-        issues.append(("SKILL_FILE_MISSING", skill, "SKILL.md cannot be a link or reparse point"))
+    skill_probe = probe_link_or_reparse_point(skill)
+    if skill_probe in {LinkProbeResult.LINK, LinkProbeResult.ERROR}:
+        record_link_probe_rejection(skill, skill_probe, unsafe, issues)
+        if skill_probe is LinkProbeResult.LINK:
+            issues.append(
+                ("SKILL_FILE_MISSING", skill, "SKILL.md cannot be a link or reparse point")
+            )
         return
     if not contained(skill, resolved_root):
         return
-    if not exact_regular_file(directory, Path("SKILL.md")):
+    if not exact_regular_file(directory, Path("SKILL.md"), unsafe, issues):
         issues.append(("SKILL_FILE_MISSING", skill, "SKILL.md is required"))
         return
     try:
@@ -439,14 +461,25 @@ def contains_parent_reference(target: str) -> bool:
     )
 
 
-def exact_regular_file(root: Path, relative: Path) -> bool:
+def exact_regular_file(
+    root: Path,
+    relative: Path,
+    unsafe: dict[Path, LinkProbeResult | None],
+    issues: list[tuple[str, Path, str]],
+) -> bool:
     current = root
     for index, component in enumerate(relative.parts):
         try:
             child = next(child for child in current.iterdir() if child.name == component)
         except (OSError, StopIteration):
             return False
-        if is_link_or_reparse_point(child):
+        if child in unsafe:
+            return False
+        probe = probe_link_or_reparse_point(child)
+        if probe in {LinkProbeResult.LINK, LinkProbeResult.ERROR}:
+            record_link_probe_rejection(child, probe, unsafe, issues)
+            return False
+        if probe is LinkProbeResult.MISSING:
             return False
         if index == len(relative.parts) - 1:
             return child.is_file()
@@ -456,14 +489,25 @@ def exact_regular_file(root: Path, relative: Path) -> bool:
     return False
 
 
-def exact_regular_directory(root: Path, relative: Path) -> bool:
+def exact_regular_directory(
+    root: Path,
+    relative: Path,
+    unsafe: dict[Path, LinkProbeResult | None],
+    issues: list[tuple[str, Path, str]],
+) -> bool:
     current = root
     for index, component in enumerate(relative.parts):
         try:
             child = next(child for child in current.iterdir() if child.name == component)
         except (OSError, StopIteration):
             return False
-        if is_link_or_reparse_point(child):
+        if child in unsafe:
+            return False
+        probe = probe_link_or_reparse_point(child)
+        if probe in {LinkProbeResult.LINK, LinkProbeResult.ERROR}:
+            record_link_probe_rejection(child, probe, unsafe, issues)
+            return False
+        if probe is LinkProbeResult.MISSING:
             return False
         if index == len(relative.parts) - 1:
             return child.is_dir()
@@ -480,25 +524,77 @@ def contained(path: Path, resolved_root: Path) -> bool:
         return False
 
 
-def is_link_or_reparse_point(path: Path) -> bool:
-    """Reject link indirection without resolving or following the directory entry."""
+def record_link_probe_rejection(
+    path: Path,
+    probe: LinkProbeResult,
+    unsafe: dict[Path, LinkProbeResult | None],
+    issues: list[tuple[str, Path, str]],
+) -> None:
+    """Record one exact-path rejection without leaking filesystem error details."""
+    if path in unsafe:
+        return
+    unsafe[path] = probe
+    if probe is LinkProbeResult.ERROR:
+        issues.append(
+            (
+                "PATH_LINK_PROBE_INVALID",
+                path,
+                "link or reparse-point metadata cannot be inspected",
+            )
+        )
+        return
+    issues.append(
+        (
+            "PATH_OUTSIDE_BUNDLE",
+            path,
+            "links and reparse points are not accepted in a portable bundle",
+        )
+    )
+
+
+def record_outside_path(
+    path: Path,
+    unsafe: dict[Path, LinkProbeResult | None],
+    issues: list[tuple[str, Path, str]],
+) -> None:
+    if path in unsafe:
+        return
+    unsafe[path] = None
+    issues.append(("PATH_OUTSIDE_BUNDLE", path, "resolved path escapes the bundle root"))
+
+
+def probe_link_or_reparse_point(path: Path) -> LinkProbeResult:
+    """Inspect one entry without resolving it and report an indeterminate probe explicitly."""
     try:
         if path.is_symlink():
-            return True
+            return LinkProbeResult.LINK
+    except FileNotFoundError:
+        return LinkProbeResult.MISSING
     except OSError:
-        return False
-    is_junction = getattr(path, "is_junction", None)
+        return LinkProbeResult.ERROR
+    try:
+        is_junction = getattr(path, "is_junction", None)
+    except FileNotFoundError:
+        return LinkProbeResult.MISSING
+    except OSError:
+        return LinkProbeResult.ERROR
     if callable(is_junction):
         try:
             if is_junction():
-                return True
+                return LinkProbeResult.LINK
+        except FileNotFoundError:
+            return LinkProbeResult.MISSING
         except OSError:
-            pass
+            return LinkProbeResult.ERROR
     try:
         attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except FileNotFoundError:
+        return LinkProbeResult.MISSING
     except OSError:
-        return False
-    return bool(attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+        return LinkProbeResult.ERROR
+    return (
+        LinkProbeResult.LINK if attributes & FILE_ATTRIBUTE_REPARSE_POINT else LinkProbeResult.SAFE
+    )
 
 
 def json_values_equal(left: object, right: object) -> bool:

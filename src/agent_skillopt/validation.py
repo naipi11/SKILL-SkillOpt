@@ -6,6 +6,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import unquote, urlsplit
 
@@ -61,6 +62,13 @@ _OPTIONAL_METADATA_FIELDS = (
 _REMOTE_LINK_SCHEMES = frozenset({"ftp", "ftps", "git", "http", "https", "ssh"})
 _PERCENT_NORMALIZATION_LIMIT = 8
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
+
+
+class _LinkProbeResult(Enum):
+    SAFE = "safe"
+    LINK = "link"
+    MISSING = "missing"
+    ERROR = "error"
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,44 +135,35 @@ def _issue(code: str, path: Path, message: str) -> ValidationIssue:
 
 def _validate_containment(
     root: Path, resolved_root: Path, issues: list[ValidationIssue]
-) -> set[Path]:
-    unsafe_paths: set[Path] = set()
+) -> dict[Path, _LinkProbeResult | None]:
+    unsafe_paths: dict[Path, _LinkProbeResult | None] = {}
     for directory, directories, filenames in os.walk(root, followlinks=False):
         current = Path(directory)
         directories.sort()
         filenames.sort()
         for name in [*directories, *filenames]:
             candidate = current / name
-            if _is_link_or_reparse_point(candidate):
-                unsafe_paths.add(candidate)
+            probe = _probe_link_or_reparse_point(candidate)
+            if probe in {_LinkProbeResult.LINK, _LinkProbeResult.ERROR}:
                 if name in directories:
                     directories.remove(name)
-                issues.append(
-                    _issue(
-                        "PATH_OUTSIDE_BUNDLE",
-                        candidate,
-                        "links and reparse points are not accepted in a portable bundle",
-                    )
-                )
+                _record_link_probe_rejection(candidate, probe, unsafe_paths, issues)
+                continue
+            if probe is _LinkProbeResult.MISSING:
                 continue
             if not _is_contained(candidate, resolved_root):
-                unsafe_paths.add(candidate)
-                issues.append(
-                    _issue(
-                        "PATH_OUTSIDE_BUNDLE", candidate, "resolved path escapes the bundle root"
-                    )
-                )
+                _record_outside_path(candidate, unsafe_paths, issues)
     return unsafe_paths
 
 
 def _validate_required_files(
-    root: Path, unsafe_paths: set[Path], issues: list[ValidationIssue]
+    root: Path, unsafe_paths: dict[Path, _LinkProbeResult | None], issues: list[ValidationIssue]
 ) -> dict[Path, bool]:
     found: dict[Path, bool] = {}
     for relative_path in _REQUIRED_FILES:
         path = root / relative_path
         is_file = (
-            _has_exact_regular_file(root, relative_path)
+            _has_exact_regular_file(root, relative_path, unsafe_paths, issues)
             and path not in unsafe_paths
             and _is_contained(path, root.resolve())
         )
@@ -347,12 +346,26 @@ def _validate_marketplace(
 def _validate_skill_tree(
     root: Path,
     resolved_root: Path,
-    unsafe_paths: set[Path],
+    unsafe_paths: dict[Path, _LinkProbeResult | None],
     identity: dict[str, object] | None,
     issues: list[ValidationIssue],
 ) -> None:
     skills_directory = root / "skills"
-    if _is_link_or_reparse_point(skills_directory):
+    if skills_directory in unsafe_paths:
+        if unsafe_paths[skills_directory] is _LinkProbeResult.LINK:
+            issues.append(
+                _issue(
+                    "SKILL_DIRECTORY_COUNT_INVALID",
+                    skills_directory,
+                    "canonical skills directory cannot be a link or reparse point",
+                )
+            )
+        return
+    probe = _probe_link_or_reparse_point(skills_directory)
+    if probe in {_LinkProbeResult.LINK, _LinkProbeResult.ERROR}:
+        _record_link_probe_rejection(skills_directory, probe, unsafe_paths, issues)
+        if probe is _LinkProbeResult.ERROR:
+            return
         issues.append(
             _issue(
                 "SKILL_DIRECTORY_COUNT_INVALID",
@@ -361,11 +374,9 @@ def _validate_skill_tree(
             )
         )
         return
-    if skills_directory in unsafe_paths:
-        return
     if not _is_contained(skills_directory, resolved_root):
         return
-    if not _has_exact_regular_directory(root, Path("skills")):
+    if not _has_exact_regular_directory(root, Path("skills"), unsafe_paths, issues):
         issues.append(
             _issue(
                 "SKILL_DIRECTORY_COUNT_INVALID",
@@ -378,14 +389,18 @@ def _validate_skill_tree(
         children = sorted(skills_directory.iterdir(), key=lambda child: child.name)
     except OSError:
         children = []
-    skill_directories = [
-        child
-        for child in children
-        if not _is_link_or_reparse_point(child)
-        and child.is_dir()
-        and child not in unsafe_paths
-        and _is_contained(child, resolved_root)
-    ]
+    skill_directories: list[Path] = []
+    for child in children:
+        if child in unsafe_paths:
+            continue
+        child_probe = _probe_link_or_reparse_point(child)
+        if child_probe in {_LinkProbeResult.LINK, _LinkProbeResult.ERROR}:
+            _record_link_probe_rejection(child, child_probe, unsafe_paths, issues)
+            continue
+        if child_probe is _LinkProbeResult.MISSING:
+            continue
+        if child.is_dir() and _is_contained(child, resolved_root):
+            skill_directories.append(child)
     if len(skill_directories) != 1:
         issues.append(
             _issue(
@@ -403,14 +418,21 @@ def _validate_skill_tree(
     skill_file = skill_directory / "SKILL.md"
     if skill_file in unsafe_paths:
         return
-    if _is_link_or_reparse_point(skill_file):
-        issues.append(
-            _issue("SKILL_FILE_MISSING", skill_file, "SKILL.md cannot be a link or reparse point")
-        )
+    skill_probe = _probe_link_or_reparse_point(skill_file)
+    if skill_probe in {_LinkProbeResult.LINK, _LinkProbeResult.ERROR}:
+        _record_link_probe_rejection(skill_file, skill_probe, unsafe_paths, issues)
+        if skill_probe is _LinkProbeResult.LINK:
+            issues.append(
+                _issue(
+                    "SKILL_FILE_MISSING",
+                    skill_file,
+                    "SKILL.md cannot be a link or reparse point",
+                )
+            )
         return
     if not _is_contained(skill_file, resolved_root):
         return
-    if not _has_exact_regular_file(skill_directory, Path("SKILL.md")):
+    if not _has_exact_regular_file(skill_directory, Path("SKILL.md"), unsafe_paths, issues):
         issues.append(_issue("SKILL_FILE_MISSING", skill_file, "SKILL.md is required"))
         return
     _validate_skill_file(skill_file, identity, issues)
@@ -507,14 +529,25 @@ def _markdown_targets(content: str) -> tuple[str, ...]:
     return tuple([*inline, *references])
 
 
-def _has_exact_regular_file(root: Path, relative_path: Path) -> bool:
+def _has_exact_regular_file(
+    root: Path,
+    relative_path: Path,
+    unsafe_paths: dict[Path, _LinkProbeResult | None],
+    issues: list[ValidationIssue],
+) -> bool:
     current = root
     for index, component in enumerate(relative_path.parts):
         try:
             child = next(child for child in current.iterdir() if child.name == component)
         except (OSError, StopIteration):
             return False
-        if _is_link_or_reparse_point(child):
+        if child in unsafe_paths:
+            return False
+        probe = _probe_link_or_reparse_point(child)
+        if probe in {_LinkProbeResult.LINK, _LinkProbeResult.ERROR}:
+            _record_link_probe_rejection(child, probe, unsafe_paths, issues)
+            return False
+        if probe is _LinkProbeResult.MISSING:
             return False
         if index == len(relative_path.parts) - 1:
             return child.is_file()
@@ -524,14 +557,25 @@ def _has_exact_regular_file(root: Path, relative_path: Path) -> bool:
     return False
 
 
-def _has_exact_regular_directory(root: Path, relative_path: Path) -> bool:
+def _has_exact_regular_directory(
+    root: Path,
+    relative_path: Path,
+    unsafe_paths: dict[Path, _LinkProbeResult | None],
+    issues: list[ValidationIssue],
+) -> bool:
     current = root
     for index, component in enumerate(relative_path.parts):
         try:
             child = next(child for child in current.iterdir() if child.name == component)
         except (OSError, StopIteration):
             return False
-        if _is_link_or_reparse_point(child):
+        if child in unsafe_paths:
+            return False
+        probe = _probe_link_or_reparse_point(child)
+        if probe in {_LinkProbeResult.LINK, _LinkProbeResult.ERROR}:
+            _record_link_probe_rejection(child, probe, unsafe_paths, issues)
+            return False
+        if probe is _LinkProbeResult.MISSING:
             return False
         if index == len(relative_path.parts) - 1:
             return child.is_dir()
@@ -548,25 +592,79 @@ def _is_contained(path: Path, resolved_root: Path) -> bool:
         return False
 
 
-def _is_link_or_reparse_point(path: Path) -> bool:
-    """Reject link indirection without resolving or following the directory entry."""
+def _record_link_probe_rejection(
+    path: Path,
+    probe: _LinkProbeResult,
+    unsafe_paths: dict[Path, _LinkProbeResult | None],
+    issues: list[ValidationIssue],
+) -> None:
+    """Record one exact-path rejection without leaking filesystem error details."""
+    if path in unsafe_paths:
+        return
+    unsafe_paths[path] = probe
+    if probe is _LinkProbeResult.ERROR:
+        issues.append(
+            _issue(
+                "PATH_LINK_PROBE_INVALID",
+                path,
+                "link or reparse-point metadata cannot be inspected",
+            )
+        )
+        return
+    issues.append(
+        _issue(
+            "PATH_OUTSIDE_BUNDLE",
+            path,
+            "links and reparse points are not accepted in a portable bundle",
+        )
+    )
+
+
+def _record_outside_path(
+    path: Path,
+    unsafe_paths: dict[Path, _LinkProbeResult | None],
+    issues: list[ValidationIssue],
+) -> None:
+    if path in unsafe_paths:
+        return
+    unsafe_paths[path] = None
+    issues.append(_issue("PATH_OUTSIDE_BUNDLE", path, "resolved path escapes the bundle root"))
+
+
+def _probe_link_or_reparse_point(path: Path) -> _LinkProbeResult:
+    """Inspect one entry without resolving it and report an indeterminate probe explicitly."""
     try:
         if path.is_symlink():
-            return True
+            return _LinkProbeResult.LINK
+    except FileNotFoundError:
+        return _LinkProbeResult.MISSING
     except OSError:
-        return False
-    is_junction = getattr(path, "is_junction", None)
+        return _LinkProbeResult.ERROR
+    try:
+        is_junction = getattr(path, "is_junction", None)
+    except FileNotFoundError:
+        return _LinkProbeResult.MISSING
+    except OSError:
+        return _LinkProbeResult.ERROR
     if callable(is_junction):
         try:
             if is_junction():
-                return True
+                return _LinkProbeResult.LINK
+        except FileNotFoundError:
+            return _LinkProbeResult.MISSING
         except OSError:
-            pass
+            return _LinkProbeResult.ERROR
     try:
         attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except FileNotFoundError:
+        return _LinkProbeResult.MISSING
     except OSError:
-        return False
-    return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT)
+        return _LinkProbeResult.ERROR
+    return (
+        _LinkProbeResult.LINK
+        if attributes & _FILE_ATTRIBUTE_REPARSE_POINT
+        else _LinkProbeResult.SAFE
+    )
 
 
 def _json_values_equal(left: object, right: object) -> bool:

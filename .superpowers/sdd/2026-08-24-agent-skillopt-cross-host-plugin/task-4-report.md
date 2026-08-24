@@ -227,3 +227,49 @@ The suite intentionally avoids a privileged live NTFS junction fixture. Its
 fallback behavior is exercised through a stat-object with the native reparse
 attribute and an `is_junction()` path simulation; Windows filesystem API
 behavior remains subject to host/filesystem implementation differences.
+
+## Repair round 5 — fail-closed link probe errors
+
+- Added the new error-path regressions before implementation. The targeted
+  run selected eight reparse/probe tests: seven failed against the prior repair
+  (the new probe-state API was absent and all three `OSError` variants allowed
+  the walk guard to descend), while the missing-layout control passed.
+- Link/reparse probing now returns explicit `SAFE`, `LINK`, `MISSING`, or
+  `ERROR` results. A non-missing `OSError` from `is_symlink()`, an available
+  `is_junction()`, or `lstat()` records deterministic
+  `PATH_LINK_PROBE_INVALID` for that exact entry, without exposing operating
+  system error text.
+- Containment, canonical `skills/`, Skill-child, `SKILL.md`, and exact
+  required-file/directory checks all consume the same probe result. Link or
+  probe-error directories are removed from `os.walk` before descent, and no
+  subsequent `iterdir()` or Skill-content read occurs for the failed entry.
+- `FileNotFoundError` remains a distinct missing state, preserving ordinary
+  `REQUIRED_FILE_MISSING` and `SKILL_DIRECTORY_COUNT_INVALID` behavior instead
+  of claiming a metadata-probe failure.
+- The parametrized tests cover `is_symlink`, `is_junction`, and `lstat`
+  failures, guard traversal and reads, and assert full issue-tuple parity
+  between the library validator and self-contained root validator. Packaged
+  asset, root wrapper, and fixture wrapper are synchronized byte-for-byte.
+
+## Repair round 5 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  58 passed.
+- `python -m pytest tests -v` — 70 passed.
+- `python -m compileall -q src tests scripts` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- SHA-256 of packaged asset, root wrapper, and fixture wrapper — all
+  `6DC78D3181DE450252F575C847F236B1901C02C0093CA3933D3F79AC641B0064`.
+- `git diff --check` — passed.
+
+## Repair round 5 residual risk
+
+The suite simulates metadata probe errors rather than inducing filesystem
+permission faults or privileged live NTFS junctions. It directly verifies the
+same Python exception boundaries and exact validator output; behavior of a
+specific Windows filesystem driver can still vary outside this local contract.

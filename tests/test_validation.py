@@ -1,4 +1,5 @@
 import json
+import runpy
 import subprocess
 import sys
 from importlib import resources
@@ -503,21 +504,29 @@ def test_link_detector_rejects_junctions_and_lstat_reparse_points():
         def lstat(self) -> SimpleNamespace:
             return SimpleNamespace(st_file_attributes=0x0400)
 
-    assert validation._is_link_or_reparse_point(JunctionPath())
-    assert validation._is_link_or_reparse_point(ReparsePointPath())
+    assert (
+        validation._probe_link_or_reparse_point(JunctionPath())
+        is validation._LinkProbeResult.LINK
+    )
+    assert (
+        validation._probe_link_or_reparse_point(ReparsePointPath())
+        is validation._LinkProbeResult.LINK
+    )
 
 
 def test_validator_rejects_a_reparse_skills_directory_before_reading_it(
     minimal_bundle: Path, monkeypatch: pytest.MonkeyPatch
 ):
     skills = minimal_bundle / "skills"
-    original_detector = validation._is_link_or_reparse_point
+    original_detector = validation._probe_link_or_reparse_point
     original_iterdir = Path.iterdir
 
     monkeypatch.setattr(
         validation,
-        "_is_link_or_reparse_point",
-        lambda path: path == skills or original_detector(path),
+        "_probe_link_or_reparse_point",
+        lambda path: (
+            validation._LinkProbeResult.LINK if path == skills else original_detector(path)
+        ),
     )
 
     def guarded_iterdir(path: Path):
@@ -537,7 +546,7 @@ def test_containment_prunes_a_reparse_directory_before_walk_descends(
 ):
     skills = minimal_bundle / "skills"
     scheduled_directories = ["skills"]
-    original_detector = validation._is_link_or_reparse_point
+    original_detector = validation._probe_link_or_reparse_point
 
     def guarded_walk(root: Path, followlinks: bool):
         yield str(root), scheduled_directories, []
@@ -547,8 +556,10 @@ def test_containment_prunes_a_reparse_directory_before_walk_descends(
     monkeypatch.setattr("agent_skillopt.validation.os.walk", guarded_walk)
     monkeypatch.setattr(
         validation,
-        "_is_link_or_reparse_point",
-        lambda path: path == skills or original_detector(path),
+        "_probe_link_or_reparse_point",
+        lambda path: (
+            validation._LinkProbeResult.LINK if path == skills else original_detector(path)
+        ),
     )
 
     codes = {issue.code for issue in validate_bundle(minimal_bundle)}
@@ -562,13 +573,17 @@ def test_validator_rejects_a_reparse_skill_child_before_reading_it(
 ):
     skill_directory = minimal_bundle / "skills" / "minimal-skill"
     skill_file = skill_directory / "SKILL.md"
-    original_detector = validation._is_link_or_reparse_point
+    original_detector = validation._probe_link_or_reparse_point
     original_read_text = Path.read_text
 
     monkeypatch.setattr(
         validation,
-        "_is_link_or_reparse_point",
-        lambda path: path == skill_directory or original_detector(path),
+        "_probe_link_or_reparse_point",
+        lambda path: (
+            validation._LinkProbeResult.LINK
+            if path == skill_directory
+            else original_detector(path)
+        ),
     )
 
     def guarded_read_text(path: Path, *args: object, **kwargs: object) -> str:
@@ -581,3 +596,89 @@ def test_validator_rejects_a_reparse_skill_child_before_reading_it(
     codes = {issue.code for issue in validate_bundle(minimal_bundle)}
 
     assert {"PATH_OUTSIDE_BUNDLE", "SKILL_DIRECTORY_COUNT_INVALID"} <= codes
+
+
+@pytest.mark.parametrize("operation", ("is_symlink", "is_junction", "lstat"))
+def test_validator_fails_closed_when_link_probe_errors(
+    minimal_bundle: Path,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+):
+    skills = minimal_bundle / "skills"
+    skill_file = skills / "minimal-skill" / "SKILL.md"
+    original_is_symlink = Path.is_symlink
+    original_is_junction = getattr(Path, "is_junction", None)
+    original_lstat = Path.lstat
+    original_iterdir = Path.iterdir
+    original_read_text = Path.read_text
+    scheduled_directory_lists: list[list[str]] = []
+
+    def failing_is_symlink(path: Path) -> bool:
+        if path == skills:
+            raise OSError("link probe failed")
+        return original_is_symlink(path)
+
+    def failing_is_junction(path: Path) -> bool:
+        if path == skills:
+            raise OSError("link probe failed")
+        if original_is_junction is None:
+            return False
+        return original_is_junction(path)
+
+    def failing_lstat(path: Path, *args: object, **kwargs: object) -> object:
+        if path == skills:
+            raise OSError("link probe failed")
+        return original_lstat(path, *args, **kwargs)
+
+    def guarded_walk(root: Path, followlinks: bool):
+        directories = ["skills"]
+        scheduled_directory_lists.append(directories)
+        yield str(root), directories, []
+        if directories:
+            raise AssertionError("a probe-failed directory must not be walked")
+
+    def guarded_iterdir(path: Path):
+        if path == skills:
+            raise AssertionError("a probe-failed directory must not be traversed")
+        return original_iterdir(path)
+
+    def guarded_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == skill_file:
+            raise AssertionError("a probe-failed directory must not be read")
+        return original_read_text(path, *args, **kwargs)
+
+    if operation == "is_symlink":
+        monkeypatch.setattr(Path, "is_symlink", failing_is_symlink)
+    elif operation == "is_junction":
+        monkeypatch.setattr(Path, "is_junction", failing_is_junction, raising=False)
+    else:
+        monkeypatch.setattr(Path, "lstat", failing_lstat)
+    monkeypatch.setattr("agent_skillopt.validation.os.walk", guarded_walk)
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+    monkeypatch.setattr(Path, "read_text", guarded_read_text)
+
+    library_output = [
+        (issue.code, issue.path, issue.message) for issue in validate_bundle(minimal_bundle)
+    ]
+    standalone = runpy.run_path(str(project_root / "tests" / "validate_bundle.py"))
+    standalone_output = standalone["validate"](minimal_bundle)
+
+    assert len(scheduled_directory_lists) == 2
+    assert all(directories == [] for directories in scheduled_directory_lists)
+    assert library_output == standalone_output == [
+        (
+            "PATH_LINK_PROBE_INVALID",
+            skills,
+            "link or reparse-point metadata cannot be inspected",
+        )
+    ]
+
+
+def test_validator_reports_a_missing_skills_directory_as_layout_invalid(minimal_bundle: Path):
+    (minimal_bundle / "skills").rename(minimal_bundle / "missing-skills")
+
+    codes = {issue.code for issue in validate_bundle(minimal_bundle)}
+
+    assert "SKILL_DIRECTORY_COUNT_INVALID" in codes
+    assert "PATH_LINK_PROBE_INVALID" not in codes
