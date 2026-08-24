@@ -305,6 +305,36 @@ def test_build_plan_rejects_identity_file_change_during_snapshot_capture(
         build_install_plan("codex", valid_bundle, None)
 
 
+def test_build_plan_rejects_a_valid_file_mutated_at_the_final_validation_boundary(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path
+):
+    """Do not return the pre-validation fingerprint when a valid file races validation."""
+    import agent_skillopt.installation as installation
+
+    original_validate = installation.assert_valid_bundle
+    validations = 0
+
+    def validate_then_mutate_after_final_pre_snapshot(root: Path) -> None:
+        nonlocal validations
+        original_validate(root)
+        validations += 1
+        if validations == 3:
+            (root / "README.md").write_text(
+                "valid content changed at the final validation boundary", encoding="utf-8"
+            )
+
+    monkeypatch.setattr(
+        installation,
+        "assert_valid_bundle",
+        validate_then_mutate_after_final_pre_snapshot,
+    )
+
+    with pytest.raises(SpecError, match="changed during snapshot"):
+        build_install_plan("codex", valid_bundle, None)
+
+    assert validations == 3
+
+
 def test_execute_install_requires_the_rendered_token(valid_bundle: Path):
     plan = build_install_plan("openclaw", valid_bundle, None)
     calls: list[tuple[str, ...]] = []

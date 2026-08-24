@@ -202,3 +202,49 @@ fetches mutable owner/repository content at execution time; the rendered
 warning presents that separate remote trust boundary explicitly. The shared
 virtual environment's stale installed 0.1.x CLI also remains a later packaging
 task concern; source-priority smoke checks avoid treating it as current code.
+
+## Repair round 3 — close the final-validation snapshot boundary
+
+### Scope delivered
+
+- A bundle snapshot now captures a guarded identity/name, fingerprint, root
+  identity, and full-tree metadata observation before the final formal
+  validation and captures a second guarded observation immediately after it.
+  The snapshots must match in canonical root, name, fingerprint, root identity,
+  and every observed entry before a plan is returned.
+- The returned InstallPlan snapshot is specifically the post-final-validation
+  observation. A valid regular-file change after the old final tree observation
+  but at the final-validation boundary therefore fails closed rather than
+  returning a stale fingerprint.
+
+### TDD and fresh evidence
+
+1. Added the final-validation-boundary regression before the implementation.
+   `C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe -m pytest tests/test_installation.py -k final_validation_boundary -v`
+   initially failed as intended: one selected test reported `DID NOT RAISE
+   SpecError` after a valid `README.md` mutation was injected immediately after
+   the prior final validation.
+2. Added matching pre/post-validation guarded observations and exact equality
+   checks. The selected regression then passed, and the normal plan tests
+   remained green.
+3. Fresh commands, all with
+   `C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`:
+
+   - `python -m pytest tests/test_installation.py -v` — 57 passed.
+   - `python -m ruff check src tests` — passed.
+   - `python -m compileall -q src tests` — passed.
+   - `python -m pytest tests -q` — 134 passed.
+   - `git diff --check` — passed.
+   - With `PYTHONPATH` set to this checkout's `src`, `python -m agent_skillopt
+     --help` and the Hermes render-only command succeeded. The render omitted
+     `--execute` and made no host invocation, remote fetch, enablement,
+     inspection, or restart.
+
+### Remaining boundary
+
+The comparison closes the interval through the final formal validation and
+post-validation capture, but cannot atomically prevent a same-privilege change
+after that capture returns and before an external host consumes the local tree.
+That external consumption interval remains explicitly unresolved. Hermes
+continues to fetch mutable remote `owner/repository` content only at explicit
+execution time, which remains a separately rendered trust boundary.

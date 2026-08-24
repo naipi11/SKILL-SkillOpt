@@ -134,22 +134,57 @@ def _validated_bundle_snapshot(root: Path) -> _BundleSnapshot:
     canonical_before = _directory_state(canonical_root)
     assert_valid_bundle(canonical_root)
     _assert_same_state(canonical_before, _directory_state(canonical_root))
-    name, identity_state = _read_validated_bundle_name(canonical_root)
-    fingerprint, observations = _bundle_fingerprint(canonical_root)
-    observed_identity = observations.get(canonical_root / "plugin.json")
-    if observed_identity is None:
-        raise SpecError("validated bundle changed during snapshot capture")
-    _assert_same_state(identity_state, observed_identity)
+    first_snapshot, first_observations = _capture_bundle_observation(canonical_root)
     _assert_same_state(canonical_before, _directory_state(canonical_root))
     assert_valid_bundle(canonical_root)
     _assert_same_state(canonical_before, _directory_state(canonical_root))
-    _assert_same_state(direct_before, _directory_state(direct_root))
-    return _BundleSnapshot(
-        root=canonical_root,
-        name=name,
-        fingerprint=fingerprint,
-        root_identity=(canonical_before.device, canonical_before.inode),
+    final_snapshot, final_observations = _capture_bundle_observation(canonical_root)
+    _assert_same_state(canonical_before, _directory_state(canonical_root))
+    _assert_matching_bundle_observations(
+        first_snapshot, first_observations, final_snapshot, final_observations
     )
+    _assert_same_state(direct_before, _directory_state(direct_root))
+    return final_snapshot
+
+
+def _capture_bundle_observation(
+    root: Path,
+) -> tuple[_BundleSnapshot, dict[Path, _EntryState]]:
+    """Return one guarded identity/tree observation that can be compared after validation."""
+    root_before = _directory_state(root)
+    name, identity_state = _read_validated_bundle_name(root)
+    fingerprint, observations = _bundle_fingerprint(root)
+    observed_identity = observations.get(root / "plugin.json")
+    if observed_identity is None:
+        raise SpecError("validated bundle changed during snapshot capture")
+    _assert_same_state(identity_state, observed_identity)
+    _assert_same_state(root_before, _directory_state(root))
+    return (
+        _BundleSnapshot(
+            root=root,
+            name=name,
+            fingerprint=fingerprint,
+            root_identity=(root_before.device, root_before.inode),
+        ),
+        observations,
+    )
+
+
+def _assert_matching_bundle_observations(
+    first_snapshot: _BundleSnapshot,
+    first_observations: dict[Path, _EntryState],
+    final_snapshot: _BundleSnapshot,
+    final_observations: dict[Path, _EntryState],
+) -> None:
+    """Reject a final validation that raced any identity or tree observation."""
+    if (
+        first_snapshot.root != final_snapshot.root
+        or first_snapshot.name != final_snapshot.name
+        or first_snapshot.fingerprint != final_snapshot.fingerprint
+        or first_snapshot.root_identity != final_snapshot.root_identity
+        or first_observations != final_observations
+    ):
+        raise SpecError("validated bundle changed during snapshot capture")
 
 
 def _read_validated_bundle_name(root: Path) -> tuple[str, _EntryState]:
