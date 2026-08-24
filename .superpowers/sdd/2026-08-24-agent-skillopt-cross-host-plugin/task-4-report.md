@@ -52,6 +52,44 @@ All commands used
 - `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
 - `git diff --check` — passed.
 
+## Repair round 3 — repeated escapes and exact identity
+
+- Added focused regressions before implementation. The initial validator run
+  reported five failures for repeated percent-encoded traversal (inline and
+  reference targets), bounded decoding, strict nested JSON types, and optional
+  metadata aggregation. The contained child-symlink regression was then
+  tightened so its valid target remains inside the bundle but outside
+  `skills/`, eliminating a directory-count false positive in the test setup.
+- Percent escapes now normalize repeatedly to a fixed eight-transformation cap.
+  A value which is still changing at the cap fails closed; decoded remote URLs
+  and `mailto` links retain their permitted behavior.
+- Canonical layout validation rejects symlinked `skills/`, immediate
+  `skills/<name>/`, and canonical `SKILL.md` entries before treating them as
+  directories or files. This prevents internal symlinks from being followed as
+  valid package layout.
+- Optional metadata equality now compares JSON recursively with exact runtime
+  types, so nested `true` and `1` are distinct. Required identity comparisons
+  and optional metadata comparisons are separated, preserving optional-drift
+  evidence when an unrelated host required field is malformed.
+- The library and portable asset were changed together; the root wrapper and
+  fixture wrapper are exact self-contained copies.
+
+## Repair round 3 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  50 passed.
+- `python -m pytest tests -v` — 62 passed.
+- `python -m compileall src` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `git diff --check` — passed.
+- SHA-256 of the packaged asset, root wrapper, and fixture wrapper — all
+  `C9DB280B280A89AA446020C05DA2A7AE528E18C33F0E41EB2B6BA920AC3061EE`.
+
 ## Repair round 2 — independent review findings
 
 - Added focused tests before implementation. Against the prior repair commit,

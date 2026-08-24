@@ -3,6 +3,7 @@ import subprocess
 import sys
 from importlib import resources
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -397,3 +398,87 @@ def test_validator_keeps_independent_checks_after_invalid_root_identity(minimal_
         "MARKETPLACE_STRUCTURE_INVALID",
         "SKILL_FRONTMATTER_INVALID",
     } <= codes
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "Read [secret](%252e%252e%252fsecret.md)",
+        "Read [secret][reference].\n\n[reference]: %252e%252e%252fsecret.md",
+    ),
+)
+def test_validator_rejects_repeatedly_encoded_markdown_traversal(minimal_bundle: Path, body: str):
+    skill = minimal_bundle / "skills" / "minimal-skill" / "SKILL.md"
+    skill.write_text(
+        "---\nname: minimal-skill\ndescription: Valid description.\n---\n" + body + "\n",
+        encoding="utf-8",
+    )
+
+    assert "SKILL_PATH_TRAVERSAL" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+def test_validator_fails_closed_when_percent_decoding_exceeds_its_bound(minimal_bundle: Path):
+    target = "%2e%2e%2fsecret.md"
+    for _ in range(16):
+        target = quote(target, safe="")
+    skill = minimal_bundle / "skills" / "minimal-skill" / "SKILL.md"
+    skill.write_text(
+        "---\nname: minimal-skill\ndescription: Valid description.\n---\n"
+        f"Read [secret]({target})\n",
+        encoding="utf-8",
+    )
+
+    assert "SKILL_PATH_TRAVERSAL" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+def test_validator_rejects_a_contained_skill_directory_symlink(minimal_bundle: Path):
+    skills = minimal_bundle / "skills"
+    skill_directory = skills / "minimal-skill"
+    target = minimal_bundle / "internal-target"
+    skill_directory.rename(target)
+    try:
+        skill_directory.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this host")
+
+    assert "SKILL_DIRECTORY_COUNT_INVALID" in {
+        issue.code for issue in validate_bundle(minimal_bundle)
+    }
+
+
+def test_validator_compares_structured_optional_metadata_with_exact_json_types(
+    minimal_bundle: Path,
+):
+    root_manifest = minimal_bundle / "plugin.json"
+    root = json.loads(root_manifest.read_text(encoding="utf-8"))
+    root["extensions"] = {"org.example": {"enabled": True}}
+    root_manifest.write_text(json.dumps(root), encoding="utf-8")
+    for host_manifest in (
+        minimal_bundle / ".codex-plugin" / "plugin.json",
+        minimal_bundle / ".claude-plugin" / "plugin.json",
+    ):
+        host = json.loads(host_manifest.read_text(encoding="utf-8"))
+        host["extensions"] = {"org.example": {"enabled": True}}
+        if host_manifest.parent.name == ".codex-plugin":
+            host["extensions"] = {"org.example": {"enabled": 1}}
+        host_manifest.write_text(json.dumps(host), encoding="utf-8")
+
+    assert "MANIFEST_METADATA_MISMATCH" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+def test_validator_aggregates_optional_metadata_drift_with_invalid_host_identity(
+    minimal_bundle: Path,
+):
+    root_manifest = minimal_bundle / "plugin.json"
+    root = json.loads(root_manifest.read_text(encoding="utf-8"))
+    root["homepage"] = "https://example.test/root"
+    root_manifest.write_text(json.dumps(root), encoding="utf-8")
+    host_manifest = minimal_bundle / ".codex-plugin" / "plugin.json"
+    host = json.loads(host_manifest.read_text(encoding="utf-8"))
+    host["version"] = 1
+    host["homepage"] = "https://example.test/drift"
+    host_manifest.write_text(json.dumps(host), encoding="utf-8")
+
+    codes = {issue.code for issue in validate_bundle(minimal_bundle)}
+
+    assert {"MANIFEST_METADATA_INVALID", "MANIFEST_METADATA_MISMATCH"} <= codes

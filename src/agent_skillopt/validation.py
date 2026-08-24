@@ -59,6 +59,7 @@ _OPTIONAL_METADATA_FIELDS = (
     "extensions",
 )
 _REMOTE_LINK_SCHEMES = frozenset({"ftp", "ftps", "git", "http", "https", "ssh"})
+_PERCENT_NORMALIZATION_LIMIT = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +134,16 @@ def _validate_containment(
         filenames.sort()
         for name in [*directories, *filenames]:
             candidate = current / name
+            if candidate.is_symlink():
+                unsafe_paths.add(candidate)
+                issues.append(
+                    _issue(
+                        "PATH_OUTSIDE_BUNDLE",
+                        candidate,
+                        "symlinks are not accepted in a portable bundle",
+                    )
+                )
+                continue
             if not _is_contained(candidate, resolved_root):
                 unsafe_paths.add(candidate)
                 issues.append(
@@ -263,15 +274,17 @@ def _validate_host_manifest(
     if manifest is None:
         return
     identity = _required_identity(path, manifest, issues)
-    if identity is not None and root_identity is not None:
-        _compare_identity(path, manifest, root_identity, issues)
+    if root_identity is not None:
+        if identity is not None:
+            _compare_required_identity(path, manifest, root_identity, issues)
+        _compare_optional_metadata(path, manifest, root_identity, issues)
     if manifest.get("skills") != ["./skills/"]:
         issues.append(
             _issue("HOST_SKILLS_PATH_INVALID", path, "skills must be exactly ['./skills/']")
         )
 
 
-def _compare_identity(
+def _compare_required_identity(
     path: Path,
     manifest: dict[str, object],
     root_identity: dict[str, object],
@@ -284,8 +297,16 @@ def _compare_identity(
     ):
         if manifest.get(field) != root_identity[field]:
             issues.append(_issue(code, path, f"{field} differs from plugin.json"))
+
+
+def _compare_optional_metadata(
+    path: Path,
+    manifest: dict[str, object],
+    root_identity: dict[str, object],
+    issues: list[ValidationIssue],
+) -> None:
     for field in _OPTIONAL_METADATA_FIELDS:
-        if field in manifest and manifest[field] != root_identity.get(field):
+        if field in manifest and not _json_values_equal(manifest[field], root_identity.get(field)):
             issues.append(
                 _issue("MANIFEST_METADATA_MISMATCH", path, f"{field} differs from plugin.json")
             )
@@ -328,7 +349,18 @@ def _validate_skill_tree(
     issues: list[ValidationIssue],
 ) -> None:
     skills_directory = root / "skills"
-    if skills_directory in unsafe_paths or not _is_contained(skills_directory, resolved_root):
+    if skills_directory.is_symlink():
+        issues.append(
+            _issue(
+                "SKILL_DIRECTORY_COUNT_INVALID",
+                skills_directory,
+                "canonical skills directory cannot be a symlink",
+            )
+        )
+        return
+    if skills_directory in unsafe_paths:
+        return
+    if not _is_contained(skills_directory, resolved_root):
         return
     if not _has_exact_regular_directory(root, Path("skills")):
         issues.append(
@@ -346,7 +378,10 @@ def _validate_skill_tree(
     skill_directories = [
         child
         for child in children
-        if child.is_dir() and child not in unsafe_paths and _is_contained(child, resolved_root)
+        if not child.is_symlink()
+        and child.is_dir()
+        and child not in unsafe_paths
+        and _is_contained(child, resolved_root)
     ]
     if len(skill_directories) != 1:
         issues.append(
@@ -363,7 +398,12 @@ def _validate_skill_tree(
             _issue("SKILL_NAME_MISMATCH", skill_directory, "Skill directory must match plugin name")
         )
     skill_file = skill_directory / "SKILL.md"
-    if skill_file in unsafe_paths or not _is_contained(skill_file, resolved_root):
+    if skill_file in unsafe_paths:
+        return
+    if skill_file.is_symlink():
+        issues.append(_issue("SKILL_FILE_MISSING", skill_file, "SKILL.md cannot be a symlink"))
+        return
+    if not _is_contained(skill_file, resolved_root):
         return
     if not _has_exact_regular_file(skill_directory, Path("SKILL.md")):
         issues.append(_issue("SKILL_FILE_MISSING", skill_file, "SKILL.md is required"))
@@ -503,11 +543,39 @@ def _is_contained(path: Path, resolved_root: Path) -> bool:
         return False
 
 
+def _json_values_equal(left: object, right: object) -> bool:
+    """Compare JSON values recursively without Python's bool/int coercion."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _json_values_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _json_values_equal(left_item, right_item) for left_item, right_item in zip(left, right)
+        )
+    return left == right
+
+
+def _normalize_percent_escapes(target: str) -> str | None:
+    """Decode nested percent escapes up to a fixed, fail-closed transformation cap."""
+    normalized = target
+    for _ in range(_PERCENT_NORMALIZATION_LIMIT):
+        decoded = unquote(normalized)
+        if decoded == normalized:
+            return normalized
+        normalized = decoded
+    return normalized if unquote(normalized) == normalized else None
+
+
 def _contains_parent_reference(target: str) -> bool:
     target = target.strip().strip("<>").split("#", 1)[0].split("?", 1)[0]
     if not target:
         return False
-    decoded = unquote(target)
+    decoded = _normalize_percent_escapes(target)
+    if decoded is None:
+        return True
     scheme = urlsplit(decoded).scheme.lower()
     if scheme in _REMOTE_LINK_SCHEMES or scheme == "mailto":
         return False
