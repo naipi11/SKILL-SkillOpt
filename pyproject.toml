@@ -4,14 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-skillopt"
-version = "0.1.0"
-description = "Safe OpenAI-compatible integration tooling for Microsoft SkillOpt"
+version = "0.2.0"
+description = "Cross-host Skill authoring tools."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-    "PyYAML>=6.0",
-]
-
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
@@ -26,9 +22,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-agent_skillopt = ["assets/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
