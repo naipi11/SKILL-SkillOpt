@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -18,6 +19,10 @@ from agent_skillopt.validation import assert_valid_bundle
 
 _SUPPORTED_HOSTS = frozenset(("codex", "claude", "hermes", "openclaw"))
 _WINDOWS_CMD_UNSAFE_CHARACTERS = frozenset("&|<>()^%!\"'")
+_HERMES_GIT_SOURCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+_HERMES_SOURCE_ERROR = (
+    "--source is required and must be an explicit owner/repository Git source for Hermes."
+)
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
@@ -93,7 +98,7 @@ def _render_install_plan(
     name = _assert_safe_command_argument(snapshot.name, "bundle name")
     if host == "hermes":
         if source is None:
-            raise SpecError("--source is required and must name a Git source for Hermes.")
+            raise SpecError(_HERMES_SOURCE_ERROR)
         steps = (
             ("hermes", "plugins", "install", source, "--no-enable"),
             ("hermes", "plugins", "enable", name),
@@ -379,12 +384,10 @@ def _validated_source(host: HostName, source: str | None) -> str | None:
 
 def _required_git_source(source: str | None) -> str:
     if not isinstance(source, str) or not source:
-        raise SpecError("--source is required and must name a Git source for Hermes.")
+        raise SpecError(_HERMES_SOURCE_ERROR)
     source = _assert_safe_command_argument(source, "Hermes source")
-    if source != source.strip() or source.startswith("-") or any(
-        character.isspace() for character in source
-    ):
-        raise SpecError("--source is required and must name a Git source for Hermes.")
+    if not _HERMES_GIT_SOURCE.fullmatch(source):
+        raise SpecError(_HERMES_SOURCE_ERROR)
     return source
 
 

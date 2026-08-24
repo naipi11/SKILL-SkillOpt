@@ -152,7 +152,7 @@ def _build_parser() -> argparse.ArgumentParser:
     install.add_argument("--path", type=Path, required=True)
     install.add_argument("--execute", action="store_true")
     install.add_argument("--confirm")
-    install.add_argument("--source", help="Hermes Git 安装源，例如 owner/repository。")
+    install.add_argument("--source", help="Hermes 明确的 <owner>/<repository> Git 安装源。")
     install.set_defaults(handler=_install_handler)
     return parser
 

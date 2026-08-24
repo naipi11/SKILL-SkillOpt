@@ -50,8 +50,39 @@ def test_hermes_plan_requires_an_explicit_git_source(valid_bundle: Path):
         build_install_plan("hermes", valid_bundle, None)
 
 
-@pytest.mark.parametrize("source", ("", " owner/repository", "--unexpected-option"))
-def test_hermes_plan_rejects_an_inappropriate_git_source(source: str, valid_bundle: Path):
+@pytest.mark.parametrize(
+    "source",
+    ("owner/repository", "owner-name/repository_name.v2", "owner_2/repository-2"),
+)
+def test_hermes_plan_accepts_an_explicit_owner_repository_git_source(
+    source: str, valid_bundle: Path
+):
+    plan = build_install_plan("hermes", valid_bundle, source)
+
+    assert plan.source == source
+    assert plan.steps[0][3] == source
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "",
+        "plugin-index",
+        " owner/repository",
+        "owner/repository ",
+        "owner\\repository",
+        "./owner/repository",
+        "/owner/repository",
+        "owner/repository/extra",
+        "https://example.test/owner/repository",
+        "owner//repository",
+        "./repository",
+        "owner/.",
+        "owner/..",
+        "--unexpected-option",
+    ),
+)
+def test_hermes_plan_rejects_a_non_owner_repository_git_source(source: str, valid_bundle: Path):
     with pytest.raises(SpecError, match="--source"):
         build_install_plan("hermes", valid_bundle, source)
 

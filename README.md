@@ -61,7 +61,7 @@ Codex、Claude 和 OpenClaw 的本地包计划不需要 source；下面命令只
 python "$skillDirectory\scripts\scaffold_bundle.py" install --host <codex|claude|openclaw> --path "$bundleRoot"
 ```
 
-Hermes 必须提供 Git source；这同样只渲染计划，不访问网络或执行宿主命令：
+Hermes 必须提供明确的 `<owner>/<repository>` Git source；这同样只渲染计划，不访问网络或执行宿主命令：
 
 ```powershell
 python "$skillDirectory\scripts\scaffold_bundle.py" install --host hermes --path "$bundleRoot" --source <owner>/<repository>
@@ -78,7 +78,7 @@ python "$skillDirectory\scripts\scaffold_bundle.py" install --host hermes --path
 | [Hermes Agent](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins) | `hermes plugins install <owner>/<repository> --no-enable`<br>`hermes plugins enable release-notes` |
 | [OpenClaw](https://docs.openclaw.ai/plugins/bundles) | `openclaw plugins install <bundle-root>`<br>`openclaw plugins inspect release-notes`<br>`openclaw gateway restart` |
 
-Hermes 需要 Git source（不是本地路径），会访问网络且远程内容可变。**Hermes Git install/enable
+Hermes 需要明确的 `<owner>/<repository>` Git source（不是裸索引名、本地路径或 URL），会访问网络且远程内容可变。**Hermes Git install/enable
 和 OpenClaw gateway restart 都是外部状态变更，绝不能因“渲染计划”自动执行。** Codex 与
 Claude 的 marketplace/add/install 也会改变用户级宿主状态。安装 token 绑定宿主、已验证路径、
 内容快照、命令及 Hermes source，但不 pin 远端 commit，也不能替代权限和来源审查。

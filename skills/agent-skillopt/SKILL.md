@@ -54,7 +54,7 @@ python <absolute-SKILL-directory>/scripts/scaffold_bundle.py validate --path <cr
 python <absolute-SKILL-directory>/scripts/scaffold_bundle.py install --host <codex|claude|openclaw> --path <created-bundle>
 ```
 
-Hermes 必须声明 Git source；下面命令也只渲染计划，远端内容可变且在实际执行时需要网络：
+Hermes 必须声明明确的 `<owner>/<repository>` Git source；下面命令也只渲染计划，远端内容可变且在实际执行时需要网络：
 
 ```text
 python <absolute-SKILL-directory>/scripts/scaffold_bundle.py install --host hermes --path <created-bundle> --source <owner>/<repository>

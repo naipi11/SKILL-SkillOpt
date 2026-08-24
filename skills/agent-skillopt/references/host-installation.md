@@ -7,7 +7,7 @@
 | --- | --- | --- |
 | Codex | `codex plugin marketplace add <bundle-root>`，再 `codex plugin add <name>@<name>` | 改变用户级 marketplace/plugin 状态。 |
 | Claude Code | `claude plugin marketplace add <bundle-root>`，再 `claude plugin install <name>@<name>` | 改变用户级 marketplace/plugin 状态。 |
-| Hermes Agent | `hermes plugins install <owner>/<repo> --no-enable`，再 `hermes plugins enable <name>` | 需要远程 Git 内容；令牌绑定源字符串但不能固定远程内容。 |
+| Hermes Agent | `hermes plugins install <owner>/<repository> --no-enable`，再 `hermes plugins enable <name>` | 只接受明确的 owner/repository Git source（非裸索引名、本地路径或 URL）；需要远程 Git 内容，令牌绑定源字符串但不能固定远程内容。 |
 | OpenClaw | `openclaw plugins install <bundle-root>`，`openclaw plugins inspect <name>`，`openclaw gateway restart` | 会安装、检查并重启网关；本包依靠 Codex-compatible discovery。 |
 
 0.2.0 没有 `openclaw.plugin.json`、Hermes `plugin.yaml`、MCP 配置、hooks 或原生宿主

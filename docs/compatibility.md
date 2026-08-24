@@ -21,7 +21,7 @@ entry point。编辑包时，安装计划的稳定快照会故意拒绝变化并
 
 - Codex CLI 证据和权限边界见[官方插件说明](https://help.openai.com/en/articles/20001256-plugins-in-codex/)。
 - Claude 的 marketplace/清单语义见[插件参考](https://code.claude.com/docs/en/plugins-reference)。
-- Hermes 的便携包和 Git source 语义见其[插件文档](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)。
+- Hermes 的便携包和 Git source 语义见其[插件文档](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)；本项目 0.2 只渲染并接受明确的 `<owner>/<repository>` Git source。
 - OpenClaw 0.2.0 没有原生 `openclaw.plugin.json` 或 runtime code；兼容发现不是运行时承诺。
 
 只有操作者另行授权实际宿主操作、使用刚渲染的 token 并观察目标宿主结果，才能更新为“本机
