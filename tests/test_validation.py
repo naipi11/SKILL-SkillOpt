@@ -294,3 +294,106 @@ def test_validator_sorts_os_walk_directory_names_in_place(
 
     assert directories == ["a", "z"]
     assert filenames == ["a.md", "z.md"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "Read [secret](file:///../secret.md)",
+        "Read [secret](%2e%2e/secret.md)",
+        "Read [secret](/absolute/secret.md)",
+        "Read [secret](\\\\server\\share\\secret.md)",
+        "Read [secret][reference].\n\n[reference]: file:///../secret.md",
+    ),
+)
+def test_validator_rejects_encoded_and_local_markdown_targets(minimal_bundle: Path, body: str):
+    skill = minimal_bundle / "skills" / "minimal-skill" / "SKILL.md"
+    skill.write_text(
+        "---\nname: minimal-skill\ndescription: Valid description.\n---\n" + body + "\n",
+        encoding="utf-8",
+    )
+
+    assert "SKILL_PATH_TRAVERSAL" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+@pytest.mark.parametrize(
+    ("field", "drift"),
+    (
+        ("author", {"name": "Different"}),
+        ("homepage", "https://example.test/drift"),
+        ("keywords", ["different"]),
+        ("extensions", {"org.example": {"setting": False}}),
+    ),
+)
+def test_validator_compares_every_optional_host_metadata_field(
+    minimal_bundle: Path, field: str, drift: object
+):
+    optional_metadata = {
+        "author": {"name": "Example"},
+        "homepage": "https://example.test/home",
+        "keywords": ["portable"],
+        "extensions": {"org.example": {"setting": True}},
+    }
+    root_manifest = minimal_bundle / "plugin.json"
+    root = json.loads(root_manifest.read_text(encoding="utf-8"))
+    root.update(optional_metadata)
+    root_manifest.write_text(json.dumps(root), encoding="utf-8")
+    for host_manifest in (
+        minimal_bundle / ".codex-plugin" / "plugin.json",
+        minimal_bundle / ".claude-plugin" / "plugin.json",
+    ):
+        host = json.loads(host_manifest.read_text(encoding="utf-8"))
+        host.update(optional_metadata)
+        if host_manifest.parent.name == ".codex-plugin":
+            host[field] = drift
+        host_manifest.write_text(json.dumps(host), encoding="utf-8")
+
+    assert "MANIFEST_METADATA_MISMATCH" in {issue.code for issue in validate_bundle(minimal_bundle)}
+
+
+def test_validator_rejects_case_mismatched_canonical_skills_directory(minimal_bundle: Path):
+    skills = minimal_bundle / "skills"
+    skills.rename(skills.with_name("Skills"))
+
+    assert "SKILL_DIRECTORY_COUNT_INVALID" in {
+        issue.code for issue in validate_bundle(minimal_bundle)
+    }
+
+
+def test_validator_rejects_a_contained_symlink_for_the_canonical_skills_directory(
+    minimal_bundle: Path,
+):
+    skills = minimal_bundle / "skills"
+    target = minimal_bundle / "skills-target"
+    skills.rename(target)
+    try:
+        skills.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this host")
+
+    assert "SKILL_DIRECTORY_COUNT_INVALID" in {
+        issue.code for issue in validate_bundle(minimal_bundle)
+    }
+
+
+def test_validator_keeps_independent_checks_after_invalid_root_identity(minimal_bundle: Path):
+    root = minimal_bundle / "plugin.json"
+    root.write_text(json.dumps({"$schema": "wrong", "name": 1}), encoding="utf-8")
+    codex = minimal_bundle / ".codex-plugin" / "plugin.json"
+    document = json.loads(codex.read_text(encoding="utf-8"))
+    document["skills"] = []
+    codex.write_text(json.dumps(document), encoding="utf-8")
+    marketplace = minimal_bundle / ".agents" / "plugins" / "marketplace.json"
+    marketplace.write_text(json.dumps({"name": "minimal-skill", "plugins": []}), encoding="utf-8")
+    skill = minimal_bundle / "skills" / "minimal-skill" / "SKILL.md"
+    skill.write_text("not frontmatter", encoding="utf-8")
+
+    codes = {issue.code for issue in validate_bundle(minimal_bundle)}
+
+    assert {
+        "MANIFEST_SCHEMA_INVALID",
+        "MANIFEST_METADATA_INVALID",
+        "HOST_SKILLS_PATH_INVALID",
+        "MARKETPLACE_STRUCTURE_INVALID",
+        "SKILL_FRONTMATTER_INVALID",
+    } <= codes

@@ -52,6 +52,46 @@ All commands used
 - `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
 - `git diff --check` — passed.
 
+## Repair round 2 — independent review findings
+
+- Added focused tests before implementation. Against the prior repair commit,
+  `python -m pytest tests/test_validation.py -q` reported eight failures:
+  five local or percent-encoded Markdown targets, optional host metadata drift,
+  case-mismatched `Skills`, and suppressed independent checks after invalid root
+  identity.
+- Markdown target validation percent-decodes first. It permits only explicit
+  remote schemes and `mailto`; `file:` URLs, unknown schemes, UNC paths, and
+  POSIX/Windows absolute paths now fail closed, including reference-style
+  targets.
+- Root identity retains every Agent Plugins v1 optional metadata field.
+  Codex/Claude manifests are compared for each optional field they provide:
+  `author`, `homepage`, `repository`, `license`, `keywords`, and `extensions`.
+- The canonical `skills` directory must be an exact-case, non-symlink regular
+  directory. This closes Windows case-folding acceptance of `Skills`.
+- Invalid root identity no longer suppresses host metadata/path checks,
+  marketplace source/shape checks, or standalone Skill structure/frontmatter
+  checks. Cross-manifest equality checks still run only when the root identity
+  is available.
+- The library validator and packaged standalone asset were updated together;
+  the root test wrapper and minimal fixture remain byte-identical copies of the
+  self-contained asset.
+
+## Repair round 2 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  44 passed.
+- `python -m pytest tests -v` — 56 passed.
+- `python -m compileall src` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `git diff --check` — passed.
+- SHA-256 of the packaged asset, root wrapper, and fixture wrapper — all
+  `5C5F47DF2355C66E4F472C277A6A0530471A9D3BF542F4E3379AA2968CA961A6`.
+
 ## Safety and deferred scope
 
 The validator performs only local filesystem and UTF-8/JSON/Markdown text

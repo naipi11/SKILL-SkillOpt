@@ -7,6 +7,7 @@ import os
 import re
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from urllib.parse import unquote, urlsplit
 
 SCHEMA_URL = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 SEMVER = re.compile(
@@ -40,6 +41,15 @@ ROOT_FIELDS = frozenset(
     }
 )
 AUTHOR_FIELDS = frozenset({"name", "email", "url"})
+OPTIONAL_METADATA_FIELDS = (
+    "author",
+    "homepage",
+    "repository",
+    "license",
+    "keywords",
+    "extensions",
+)
+REMOTE_LINK_SCHEMES = frozenset({"ftp", "ftps", "git", "http", "https", "ssh"})
 UNFINISHED = ("TODO", "TBD", "<skill-name>")
 
 
@@ -53,14 +63,13 @@ def validate(root: Path) -> list[tuple[str, Path, str]]:
     present = validate_required(root, resolved_root, unsafe, issues)
     root_manifest = load(root / "plugin.json", issues) if present[Path("plugin.json")] else None
     identity = root_identity(root / "plugin.json", root_manifest, issues)
-    if identity is None:
-        return issues
     for relative in HOSTS:
         manifest = load(root / relative, issues) if present[relative] else None
         host(root / relative, manifest, identity, issues)
+    expected_name = identity["name"] if identity is not None else None
     for relative in MARKETS:
         manifest = load(root / relative, issues) if present[relative] else None
-        marketplace(root / relative, manifest, identity["name"], issues)
+        marketplace(root / relative, manifest, expected_name, issues)
     skill_tree(root, resolved_root, unsafe, identity, issues)
     return issues
 
@@ -116,7 +125,7 @@ def load(path: Path, issues: list[tuple[str, Path, str]]) -> dict[str, object] |
 
 def root_identity(
     path: Path, manifest: dict[str, object] | None, issues: list[tuple[str, Path, str]]
-) -> dict[str, str] | None:
+) -> dict[str, object] | None:
     if manifest is None:
         return None
     validate_root_fields(path, manifest, issues)
@@ -124,10 +133,9 @@ def root_identity(
         issues.append(("MANIFEST_SCHEMA_INVALID", path, "manifest schema URL is invalid"))
     identity = required_identity(path, manifest, issues)
     if identity is not None:
-        for field in ("repository", "license"):
-            value = manifest.get(field)
-            if isinstance(value, str):
-                identity[field] = value
+        for field in OPTIONAL_METADATA_FIELDS:
+            if field in manifest:
+                identity[field] = manifest[field]
     return identity
 
 
@@ -188,12 +196,12 @@ def required_identity(
 def host(
     path: Path,
     manifest: dict[str, object] | None,
-    identity: dict[str, str],
+    identity: dict[str, object] | None,
     issues: list[tuple[str, Path, str]],
 ) -> None:
     if manifest is None:
         return
-    if required_identity(path, manifest, issues) is not None:
+    if required_identity(path, manifest, issues) is not None and identity is not None:
         for field, code in (
             ("name", "MANIFEST_NAME_MISMATCH"),
             ("version", "MANIFEST_VERSION_MISMATCH"),
@@ -201,7 +209,7 @@ def host(
         ):
             if manifest.get(field) != identity[field]:
                 issues.append((code, path, f"{field} differs from plugin.json"))
-        for field in ("repository", "license"):
+        for field in OPTIONAL_METADATA_FIELDS:
             if field in manifest and manifest[field] != identity.get(field):
                 issues.append(
                     ("MANIFEST_METADATA_MISMATCH", path, f"{field} differs from plugin.json")
@@ -213,12 +221,12 @@ def host(
 def marketplace(
     path: Path,
     manifest: dict[str, object] | None,
-    expected_name: str,
+    expected_name: str | None,
     issues: list[tuple[str, Path, str]],
 ) -> None:
     if manifest is None:
         return
-    if manifest.get("name") != expected_name:
+    if expected_name is not None and manifest.get("name") != expected_name:
         issues.append(
             ("MARKETPLACE_NAME_MISMATCH", path, "marketplace name differs from plugin.json")
         )
@@ -227,7 +235,9 @@ def marketplace(
         issues.append(("MARKETPLACE_STRUCTURE_INVALID", path, "marketplace needs one plugin entry"))
         return
     plugin = plugins[0]
-    if plugin.get("name") != expected_name or plugin.get("source") != "./":
+    if plugin.get("source") != "./" or (
+        expected_name is not None and plugin.get("name") != expected_name
+    ):
         issues.append(
             ("MARKETPLACE_SOURCE_INVALID", path, "plugin must use matching name and './' source")
         )
@@ -237,11 +247,20 @@ def skill_tree(
     root: Path,
     resolved_root: Path,
     unsafe: set[Path],
-    identity: dict[str, str],
+    identity: dict[str, object] | None,
     issues: list[tuple[str, Path, str]],
 ) -> None:
     skills = root / "skills"
     if skills in unsafe or not contained(skills, resolved_root):
+        return
+    if not exact_regular_directory(root, Path("skills")):
+        issues.append(
+            (
+                "SKILL_DIRECTORY_COUNT_INVALID",
+                skills,
+                "exactly one canonical skills directory is required",
+            )
+        )
         return
     try:
         children = sorted(skills.iterdir(), key=lambda child: child.name)
@@ -258,7 +277,7 @@ def skill_tree(
         )
         return
     directory = directories[0]
-    if directory.name != identity["name"]:
+    if identity is not None and directory.name != identity["name"]:
         issues.append(("SKILL_NAME_MISMATCH", directory, "Skill directory must match plugin name"))
     skill = directory / "SKILL.md"
     if skill in unsafe or not contained(skill, resolved_root):
@@ -277,9 +296,10 @@ def skill_tree(
             ("SKILL_FRONTMATTER_INVALID", skill, "frontmatter must be strict name and description")
         )
         return
-    if frontmatter["name"] != identity["name"]:
+    expected_skill_name = identity["name"] if identity is not None else directory.name
+    if frontmatter["name"] != expected_skill_name:
         issues.append(("SKILL_NAME_MISMATCH", skill, "frontmatter name differs from plugin.json"))
-    if frontmatter["description"] != identity["description"]:
+    if identity is not None and frontmatter["description"] != identity["description"]:
         issues.append(
             (
                 "SKILL_DESCRIPTION_MISMATCH",
@@ -348,11 +368,21 @@ def markdown_targets(content: str) -> tuple[str, ...]:
 
 def contains_parent_reference(target: str) -> bool:
     target = target.strip().strip("<>").split("#", 1)[0].split("?", 1)[0]
-    if not target or "://" in target or target.startswith("mailto:"):
+    if not target:
         return False
+    decoded = unquote(target)
+    scheme = urlsplit(decoded).scheme.lower()
+    if scheme in REMOTE_LINK_SCHEMES or scheme == "mailto":
+        return False
+    if scheme:
+        return True
+    posix_path = PurePosixPath(decoded.replace("\\", "/"))
+    windows_path = PureWindowsPath(decoded)
     return (
-        ".." in PurePosixPath(target.replace("\\", "/")).parts
-        or ".." in PureWindowsPath(target).parts
+        posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or ".." in posix_path.parts
+        or ".." in windows_path.parts
     )
 
 
@@ -367,6 +397,23 @@ def exact_regular_file(root: Path, relative: Path) -> bool:
             return False
         if index == len(relative.parts) - 1:
             return child.is_file()
+        if not child.is_dir():
+            return False
+        current = child
+    return False
+
+
+def exact_regular_directory(root: Path, relative: Path) -> bool:
+    current = root
+    for index, component in enumerate(relative.parts):
+        try:
+            child = next(child for child in current.iterdir() if child.name == component)
+        except (OSError, StopIteration):
+            return False
+        if child.is_symlink():
+            return False
+        if index == len(relative.parts) - 1:
+            return child.is_dir()
         if not child.is_dir():
             return False
         current = child

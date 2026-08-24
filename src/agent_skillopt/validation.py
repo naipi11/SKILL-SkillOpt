@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from urllib.parse import unquote, urlsplit
 
 from agent_skillopt.errors import AgentSkillOptError
 
@@ -49,6 +50,15 @@ _ROOT_FIELDS = frozenset(
     }
 )
 _AUTHOR_FIELDS = frozenset({"name", "email", "url"})
+_OPTIONAL_METADATA_FIELDS = (
+    "author",
+    "homepage",
+    "repository",
+    "license",
+    "keywords",
+    "extensions",
+)
+_REMOTE_LINK_SCHEMES = frozenset({"ftp", "ftps", "git", "http", "https", "ssh"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +103,12 @@ def validate_bundle(root: Path) -> tuple[ValidationIssue, ...]:
         path: _load_manifest(bundle_root / path, issues) if required[path] else None
         for path in _MARKETPLACES
     }
-    if root_identity is not None:
-        for path, manifest in host_manifests.items():
-            _validate_host_manifest(bundle_root / path, manifest, root_identity, issues)
-        for path, manifest in marketplace_manifests.items():
-            _validate_marketplace(bundle_root / path, manifest, root_identity["name"], issues)
-        _validate_skill_tree(bundle_root, resolved_root, unsafe_paths, root_identity, issues)
+    for path, manifest in host_manifests.items():
+        _validate_host_manifest(bundle_root / path, manifest, root_identity, issues)
+    expected_name = root_identity["name"] if root_identity is not None else None
+    for path, manifest in marketplace_manifests.items():
+        _validate_marketplace(bundle_root / path, manifest, expected_name, issues)
+    _validate_skill_tree(bundle_root, resolved_root, unsafe_paths, root_identity, issues)
     return tuple(issues)
 
 
@@ -164,7 +174,7 @@ def _load_manifest(path: Path, issues: list[ValidationIssue]) -> dict[str, objec
 
 def _validate_root_manifest(
     path: Path, manifest: dict[str, object] | None, issues: list[ValidationIssue]
-) -> dict[str, str] | None:
+) -> dict[str, object] | None:
     if manifest is None:
         return None
     _validate_root_fields(path, manifest, issues)
@@ -172,10 +182,9 @@ def _validate_root_manifest(
         issues.append(_issue("MANIFEST_SCHEMA_INVALID", path, "manifest schema URL is invalid"))
     identity = _required_identity(path, manifest, issues)
     if identity is not None:
-        for field in ("repository", "license"):
-            value = manifest.get(field)
-            if isinstance(value, str):
-                identity[field] = value
+        for field in _OPTIONAL_METADATA_FIELDS:
+            if field in manifest:
+                identity[field] = manifest[field]
     return identity
 
 
@@ -248,13 +257,13 @@ def _required_identity(
 def _validate_host_manifest(
     path: Path,
     manifest: dict[str, object] | None,
-    root_identity: dict[str, str],
+    root_identity: dict[str, object] | None,
     issues: list[ValidationIssue],
 ) -> None:
     if manifest is None:
         return
     identity = _required_identity(path, manifest, issues)
-    if identity is not None:
+    if identity is not None and root_identity is not None:
         _compare_identity(path, manifest, root_identity, issues)
     if manifest.get("skills") != ["./skills/"]:
         issues.append(
@@ -265,7 +274,7 @@ def _validate_host_manifest(
 def _compare_identity(
     path: Path,
     manifest: dict[str, object],
-    root_identity: dict[str, str],
+    root_identity: dict[str, object],
     issues: list[ValidationIssue],
 ) -> None:
     for field, code in (
@@ -275,7 +284,7 @@ def _compare_identity(
     ):
         if manifest.get(field) != root_identity[field]:
             issues.append(_issue(code, path, f"{field} differs from plugin.json"))
-    for field in ("repository", "license"):
+    for field in _OPTIONAL_METADATA_FIELDS:
         if field in manifest and manifest[field] != root_identity.get(field):
             issues.append(
                 _issue("MANIFEST_METADATA_MISMATCH", path, f"{field} differs from plugin.json")
@@ -285,12 +294,12 @@ def _compare_identity(
 def _validate_marketplace(
     path: Path,
     manifest: dict[str, object] | None,
-    expected_name: str,
+    expected_name: str | None,
     issues: list[ValidationIssue],
 ) -> None:
     if manifest is None:
         return
-    if manifest.get("name") != expected_name:
+    if expected_name is not None and manifest.get("name") != expected_name:
         issues.append(
             _issue("MARKETPLACE_NAME_MISMATCH", path, "marketplace name differs from plugin.json")
         )
@@ -301,7 +310,9 @@ def _validate_marketplace(
         )
         return
     plugin = plugins[0]
-    if plugin.get("name") != expected_name or plugin.get("source") != "./":
+    if plugin.get("source") != "./" or (
+        expected_name is not None and plugin.get("name") != expected_name
+    ):
         issues.append(
             _issue(
                 "MARKETPLACE_SOURCE_INVALID", path, "plugin must use matching name and './' source"
@@ -313,11 +324,20 @@ def _validate_skill_tree(
     root: Path,
     resolved_root: Path,
     unsafe_paths: set[Path],
-    identity: dict[str, str],
+    identity: dict[str, object] | None,
     issues: list[ValidationIssue],
 ) -> None:
     skills_directory = root / "skills"
     if skills_directory in unsafe_paths or not _is_contained(skills_directory, resolved_root):
+        return
+    if not _has_exact_regular_directory(root, Path("skills")):
+        issues.append(
+            _issue(
+                "SKILL_DIRECTORY_COUNT_INVALID",
+                skills_directory,
+                "exactly one canonical skills directory is required",
+            )
+        )
         return
     try:
         children = sorted(skills_directory.iterdir(), key=lambda child: child.name)
@@ -338,7 +358,7 @@ def _validate_skill_tree(
         )
         return
     skill_directory = skill_directories[0]
-    if skill_directory.name != identity["name"]:
+    if identity is not None and skill_directory.name != identity["name"]:
         issues.append(
             _issue("SKILL_NAME_MISMATCH", skill_directory, "Skill directory must match plugin name")
         )
@@ -352,7 +372,7 @@ def _validate_skill_tree(
 
 
 def _validate_skill_file(
-    path: Path, identity: dict[str, str], issues: list[ValidationIssue]
+    path: Path, identity: dict[str, object] | None, issues: list[ValidationIssue]
 ) -> None:
     try:
         content = path.read_text(encoding="utf-8")
@@ -367,11 +387,12 @@ def _validate_skill_file(
             )
         )
         return
-    if frontmatter["name"] != identity["name"]:
+    expected_name = identity["name"] if identity is not None else path.parent.name
+    if frontmatter["name"] != expected_name:
         issues.append(
             _issue("SKILL_NAME_MISMATCH", path, "frontmatter name differs from plugin name")
         )
-    if frontmatter["description"] != identity["description"]:
+    if identity is not None and frontmatter["description"] != identity["description"]:
         issues.append(
             _issue(
                 "SKILL_DESCRIPTION_MISMATCH",
@@ -458,6 +479,23 @@ def _has_exact_regular_file(root: Path, relative_path: Path) -> bool:
     return False
 
 
+def _has_exact_regular_directory(root: Path, relative_path: Path) -> bool:
+    current = root
+    for index, component in enumerate(relative_path.parts):
+        try:
+            child = next(child for child in current.iterdir() if child.name == component)
+        except (OSError, StopIteration):
+            return False
+        if child.is_symlink():
+            return False
+        if index == len(relative_path.parts) - 1:
+            return child.is_dir()
+        if not child.is_dir():
+            return False
+        current = child
+    return False
+
+
 def _is_contained(path: Path, resolved_root: Path) -> bool:
     try:
         return path.resolve().is_relative_to(resolved_root)
@@ -467,8 +505,19 @@ def _is_contained(path: Path, resolved_root: Path) -> bool:
 
 def _contains_parent_reference(target: str) -> bool:
     target = target.strip().strip("<>").split("#", 1)[0].split("?", 1)[0]
-    if not target or "://" in target or target.startswith("mailto:"):
+    if not target:
         return False
-    posix_path = PurePosixPath(target.replace("\\", "/"))
-    windows_path = PureWindowsPath(target)
-    return ".." in posix_path.parts or ".." in windows_path.parts
+    decoded = unquote(target)
+    scheme = urlsplit(decoded).scheme.lower()
+    if scheme in _REMOTE_LINK_SCHEMES or scheme == "mailto":
+        return False
+    if scheme:
+        return True
+    posix_path = PurePosixPath(decoded.replace("\\", "/"))
+    windows_path = PureWindowsPath(decoded)
+    return (
+        posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or ".." in posix_path.parts
+        or ".." in windows_path.parts
+    )
