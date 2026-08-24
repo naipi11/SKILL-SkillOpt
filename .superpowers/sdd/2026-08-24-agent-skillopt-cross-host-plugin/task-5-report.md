@@ -248,3 +248,55 @@ after that capture returns and before an external host consumes the local tree.
 That external consumption interval remains explicitly unresolved. Hermes
 continues to fetch mutable remote `owner/repository` content only at explicit
 execution time, which remains a separately rendered trust boundary.
+
+## Repair round 4 — Windows Python 3.12 lstat/fstat ctime compatibility
+
+### Scope delivered
+
+- Fixed the verified false positive in the render-only Task 5 installation
+  snapshot path on Windows Python 3.12.10: for an untouched file, Windows
+  exposes creation time through `lstat().st_ctime_ns` but descriptor `fstat()`
+  exposes modification time in that field.
+- Added the deliberately narrow `_assert_path_state_matches_descriptor()`
+  boundary helper. It replaces only the expected path ctime with the observed
+  descriptor ctime and then uses the existing strict `_assert_same_state()`
+  comparison. Device, inode, mode, size, and mtime all remain mandatory.
+- The initial lstat-to-fstat check is the sole normalized comparison. The
+  initial/post-read descriptor states remain strict, as do all initial/post-read
+  path states and every snapshot/tree observation. No-follow/reparse checks,
+  content hashing, and path-before/path-after race detection are unchanged.
+
+### Regression and verification evidence
+
+- Added descriptor-only ctime simulation that is accepted, plus parameterized
+  rejections for every other descriptor field (device, inode, mode, size, and
+  mtime). A separate regression proves descriptor ctime drift during the read
+  remains rejected by the strict fstat-to-fstat comparison, and another proves
+  path-to-path ctime-only differences remain rejected.
+- Before repair, with
+  `C:\\Users\\33384\\AppData\\Local\\Programs\\Python\\Python312\\python.exe`, the exact
+  `python skills\\agent-skillopt\\scripts\\scaffold_bundle.py install --host codex --path .`
+  wrapper command exited 2 with `安装计划失败：Skill 包或安装参数无效。`; the root
+  wrapper validator returned `VALID` (exit 0).
+- After repair, that exact Python 3.12 wrapper command exited 0 and emitted the
+  render-only JSON plan. It omitted `--execute`, so it performed no host
+  installation, enablement, restart, fetch, or other host mutation.
+- Fresh source-first checks with
+  `C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`:
+  `python -m pytest tests/test_installation.py -v` — 65 passed;
+  `python -m compileall -q src tests skills\\agent-skillopt\\scripts` — passed;
+  `python -m pytest tests -q` — 166 passed;
+  `python scripts\\validate_bundle.py .` — `VALID`;
+  `python -m ruff check src tests skills\\agent-skillopt\\scripts` — passed.
+- Git Bash validation ran `scripts/validate.sh` against the same venv and
+  source tree: 166 passed, root `VALID`, and Ruff passed. `git diff --check`
+  also passed.
+
+### Residual risk
+
+The same narrow post-snapshot external-host consumption interval remains: a
+same-privilege process can still change the tree after final revalidation but
+before an external host consumes it. The ctime normalization does not expand
+that interval; it applies only to the known incompatible Windows path/descriptor
+representation boundary. Hermes remains an independent mutable-remote-content
+trust boundary at explicit execution time.
