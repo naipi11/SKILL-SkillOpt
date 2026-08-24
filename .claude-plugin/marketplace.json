@@ -1,0 +1,13 @@
+{
+  "name": "agent-skillopt",
+  "description": "Create review-gated portable Skill packages for coding agents.",
+  "owner": {
+    "name": "naipi11"
+  },
+  "plugins": [
+    {
+      "name": "agent-skillopt",
+      "source": "./"
+    }
+  ]
+}

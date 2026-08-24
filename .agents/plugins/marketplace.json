@@ -1,0 +1,10 @@
+{
+  "name": "agent-skillopt",
+  "description": "Create review-gated portable Skill packages for coding agents.",
+  "plugins": [
+    {
+      "name": "agent-skillopt",
+      "source": "./"
+    }
+  ]
+}
