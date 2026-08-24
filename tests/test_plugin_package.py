@@ -1,11 +1,8 @@
 """Contract tests for the repository's installable four-host package."""
 
-import importlib.machinery
 import json
-import runpy
 import subprocess
 import sys
-import types
 
 import pytest
 
@@ -151,28 +148,40 @@ def test_scaffolder_wrapper_discards_a_cached_module_from_repo_outside_src(proje
     assert "REPOSITORY_LOCAL_STALE_AGENT_SKILLOPT" not in result.stdout
 
 
-def test_scaffolder_wrapper_trusts_only_resolved_src_module_origins(project_root, tmp_path):
+@pytest.mark.parametrize("use_external_search_path", (False, True))
+def test_scaffolder_wrapper_discards_source_looking_package_with_poisoned_search_paths(
+    project_root, tmp_path, use_external_search_path
+):
     wrapper = project_root / "skills" / "agent-skillopt" / "scripts" / "scaffold_bundle.py"
     source_root = (project_root / "src").resolve()
-    module = types.ModuleType("agent_skillopt.cli")
-    source_file = source_root / "agent_skillopt" / "cli.py"
-    module.__file__ = str(source_file)
-    module.__spec__ = importlib.machinery.ModuleSpec(
-        "agent_skillopt.cli", None, origin=str(source_file)
+    source_init = source_root / "agent_skillopt" / "__init__.py"
+    poisoned_paths = [str(tmp_path / "poisoned-search")] if use_external_search_path else []
+    command = "\n".join(
+        (
+            "import importlib.machinery",
+            "import runpy",
+            "import sys",
+            "import types",
+            "package = types.ModuleType('agent_skillopt')",
+            f"package.__file__ = {str(source_init)!r}",
+            "package.__spec__ = importlib.machinery.ModuleSpec('agent_skillopt', None,",
+            "    is_package=True)",
+            "package.__spec__.origin = package.__file__",
+            f"package.__path__ = {poisoned_paths!r}",
+            f"package.__spec__.submodule_search_locations = {poisoned_paths!r}",
+            "sys.modules['agent_skillopt'] = package",
+            f"sys.path.append({str(source_root)!r})",
+            f"runpy.run_path({str(wrapper)!r}, run_name='__main__')",
+        )
     )
-    wrapper_namespace = runpy.run_path(str(wrapper), run_name="scaffold_bundle_test")
-    origin_is_within = wrapper_namespace["_module_origin_is_within"]
 
-    assert origin_is_within(module, source_root)
-
-    source_link = tmp_path / "cli-link.py"
-    try:
-        source_link.symlink_to(source_file)
-    except OSError:
-        pytest.skip("symlink creation is unavailable on this host")
-    module.__file__ = str(source_link)
-    module.__spec__ = importlib.machinery.ModuleSpec(
-        "agent_skillopt.cli", None, origin=str(source_link)
+    result = subprocess.run(
+        [sys.executable, "-c", command, "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
-    assert origin_is_within(module, source_root)
+    assert result.returncode == 0
+    assert "preview" in result.stdout
