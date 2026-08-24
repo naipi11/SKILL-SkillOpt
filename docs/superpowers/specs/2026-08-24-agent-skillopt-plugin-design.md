@@ -73,7 +73,8 @@ Agent-SkillOpt/
 ├── tests/
 │   ├── fixtures/
 │   │   └── minimal-skill/
-│   └── test_bundle_contract.py
+│   ├── test_bundle_contract.py
+│   └── validate_bundle.py
 ├── docs/
 │   └── migration-v0.2.md
 └── README.md
