@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -15,6 +16,7 @@ from agent_skillopt.errors import (
     SpecError,
     WriteConflictError,
 )
+from agent_skillopt.installation import build_install_plan, execute_install
 from agent_skillopt.models import SkillSpec
 from agent_skillopt.validation import validate_bundle
 
@@ -79,6 +81,42 @@ def _validate_handler(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _subprocess_runner(command: tuple[str, ...]) -> int:
+    """Run one already-rendered argv tuple without invoking a shell."""
+    return subprocess.run(command, shell=False, check=False).returncode
+
+
+def _install_handler(arguments: argparse.Namespace) -> int:
+    """Render a host plan, or run it only through the exact confirmation gate."""
+    try:
+        plan = build_install_plan(arguments.host, arguments.path, arguments.source)
+    except AgentSkillOptError:
+        print("安装计划失败：Skill 包或安装参数无效。", file=sys.stderr)
+        return 2
+
+    if plan.network_required:
+        print("警告：此 Hermes 安装计划会访问指定的 Git 源。", file=sys.stderr)
+    print(
+        json.dumps(
+            {
+                "confirmation_token": plan.confirmation_token,
+                "network_required": plan.network_required,
+                "steps": [list(step) for step in plan.steps],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    if not arguments.execute:
+        return 0
+
+    try:
+        return execute_install(plan, arguments.confirm, _subprocess_runner)
+    except ConfirmationError:
+        print("安装失败：确认令牌无效。", file=sys.stderr)
+        return 2
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Build the 0.2.0 command parser."""
     parser = argparse.ArgumentParser(
@@ -108,7 +146,7 @@ def _build_parser() -> argparse.ArgumentParser:
     install.add_argument("--execute", action="store_true")
     install.add_argument("--confirm")
     install.add_argument("--source", help="Hermes Git 安装源，例如 owner/repository。")
-    install.set_defaults(handler=_unavailable_handler)
+    install.set_defaults(handler=_install_handler)
     return parser
 
 

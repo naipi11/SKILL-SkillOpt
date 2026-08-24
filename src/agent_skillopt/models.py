@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Literal
+from typing import Literal, TypeAlias
 
 from agent_skillopt.errors import SpecError
 from agent_skillopt.naming import normalize_skill_name
@@ -19,6 +19,8 @@ _SEMANTIC_VERSION_PATTERN = re.compile(
 _TOP_LEVEL_KEYS = {"name", "description", "body", "output_directory", "version", "resources"}
 _RESOURCE_KEYS = {"kind", "filename", "content"}
 _RESOURCE_KINDS = {"reference", "script", "asset"}
+
+HostName: TypeAlias = Literal["codex", "claude", "hermes", "openclaw"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +101,16 @@ class BundlePlan:
     output_directory: Path
     files: tuple[PlannedFile, ...]
     confirmation_token: str
+
+
+@dataclass(frozen=True, slots=True)
+class InstallPlan:
+    """One immutable, explicit host installation operation."""
+
+    host: HostName
+    steps: tuple[tuple[str, ...], ...]
+    confirmation_token: str
+    network_required: bool
 
 
 def _required_text(value: object, field: str) -> str:
