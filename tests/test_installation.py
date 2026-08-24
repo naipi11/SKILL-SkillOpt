@@ -1,4 +1,5 @@
 import json
+import stat
 from dataclasses import replace
 from pathlib import Path
 from shutil import copytree
@@ -282,6 +283,113 @@ def test_execute_install_rejects_a_file_that_changes_during_snapshot_capture(
 
     assert changed is True
     assert calls == []
+
+
+def test_stable_file_accepts_the_windows_descriptor_only_ctime_difference(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path
+):
+    """Windows 3.12 lstat and fstat disagree on ctime for an unchanged file."""
+    import agent_skillopt.installation as installation
+
+    original_fstat = installation.os.fstat
+
+    def descriptor_stat_with_mtime_ctime(descriptor: int) -> SimpleNamespace:
+        result = original_fstat(descriptor)
+        return SimpleNamespace(
+            st_dev=result.st_dev,
+            st_ino=result.st_ino,
+            st_mode=result.st_mode,
+            st_size=result.st_size,
+            st_mtime_ns=result.st_mtime_ns,
+            st_ctime_ns=result.st_ctime_ns + 1,
+            st_file_attributes=getattr(result, "st_file_attributes", 0),
+        )
+
+    monkeypatch.setattr(installation.os, "fstat", descriptor_stat_with_mtime_ctime)
+
+    content, state = installation._read_stable_file(valid_bundle / "plugin.json")
+
+    assert content
+    assert state == installation._regular_file_state(valid_bundle / "plugin.json")
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("st_dev", lambda value: value + 1),
+        ("st_ino", lambda value: value + 1),
+        ("st_mode", lambda value: value ^ stat.S_IXUSR),
+        ("st_size", lambda value: value + 1),
+        ("st_mtime_ns", lambda value: value + 1),
+    ),
+)
+def test_stable_file_rejects_each_non_ctime_descriptor_state_difference(
+    monkeypatch: pytest.MonkeyPatch,
+    valid_bundle: Path,
+    field: str,
+    replacement,
+):
+    import agent_skillopt.installation as installation
+
+    original_fstat = installation.os.fstat
+
+    def descriptor_stat_with_one_changed_field(descriptor: int) -> SimpleNamespace:
+        result = original_fstat(descriptor)
+        values = {
+            "st_dev": result.st_dev,
+            "st_ino": result.st_ino,
+            "st_mode": result.st_mode,
+            "st_size": result.st_size,
+            "st_mtime_ns": result.st_mtime_ns,
+            "st_ctime_ns": result.st_ctime_ns,
+            "st_file_attributes": getattr(result, "st_file_attributes", 0),
+        }
+        values[field] = replacement(values[field])
+        return SimpleNamespace(**values)
+
+    monkeypatch.setattr(installation.os, "fstat", descriptor_stat_with_one_changed_field)
+
+    with pytest.raises(SpecError, match="changed during snapshot"):
+        installation._read_stable_file(valid_bundle / "plugin.json")
+
+
+def test_stable_file_rejects_descriptor_ctime_that_changes_while_reading(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path
+):
+    import agent_skillopt.installation as installation
+
+    original_fstat = installation.os.fstat
+    observations = 0
+
+    def descriptor_stat_with_read_time_ctime_change(descriptor: int) -> SimpleNamespace:
+        nonlocal observations
+        observations += 1
+        result = original_fstat(descriptor)
+        return SimpleNamespace(
+            st_dev=result.st_dev,
+            st_ino=result.st_ino,
+            st_mode=result.st_mode,
+            st_size=result.st_size,
+            st_mtime_ns=result.st_mtime_ns,
+            st_ctime_ns=result.st_ctime_ns + observations,
+            st_file_attributes=getattr(result, "st_file_attributes", 0),
+        )
+
+    monkeypatch.setattr(installation.os, "fstat", descriptor_stat_with_read_time_ctime_change)
+
+    with pytest.raises(SpecError, match="changed during snapshot"):
+        installation._read_stable_file(valid_bundle / "plugin.json")
+
+    assert observations == 2
+
+
+def test_path_state_comparisons_still_reject_a_ctime_only_difference():
+    import agent_skillopt.installation as installation
+
+    original = installation._EntryState(1, 2, stat.S_IFREG, 3, 4, 5)
+
+    with pytest.raises(SpecError, match="changed during snapshot"):
+        installation._assert_same_state(original, replace(original, ctime_ns=6))
 
 
 def test_build_plan_rejects_identity_file_change_during_snapshot_capture(

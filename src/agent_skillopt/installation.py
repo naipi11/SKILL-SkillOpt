@@ -7,7 +7,7 @@ import json
 import os
 import stat
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -279,7 +279,7 @@ def _read_stable_file(
         raise SpecError("validated bundle file cannot be opened safely") from error
     try:
         opened = _regular_file_state_from_stat(os.fstat(descriptor))
-        _assert_same_state(before, opened)
+        _assert_path_state_matches_descriptor(before, opened)
         chunks: list[bytes] = []
         while chunk := os.read(descriptor, 64 * 1024):
             if consume is None:
@@ -295,8 +295,7 @@ def _read_stable_file(
         except OSError as error:
             raise SpecError("validated bundle file cannot be closed safely") from error
     after_path = _regular_file_state(path)
-    _assert_same_state(before, opened)
-    _assert_same_state(before, after_descriptor)
+    _assert_same_state(opened, after_descriptor)
     _assert_same_state(before, after_path)
     return b"".join(chunks) if consume is None else b"", before
 
@@ -348,6 +347,22 @@ def _entry_state(info: os.stat_result) -> _EntryState:
 def _assert_same_state(expected: _EntryState, observed: _EntryState) -> None:
     if expected != observed:
         raise SpecError("validated bundle changed during snapshot capture")
+
+
+def _assert_path_state_matches_descriptor(
+    expected_path: _EntryState, observed_descriptor: _EntryState
+) -> None:
+    """Compare initial lstat and fstat without relying on Windows' incompatible ctime meanings.
+
+    CPython 3.12 on Windows reports creation time for ``lstat().st_ctime_ns``
+    but modification time for ``fstat().st_ctime_ns`` of the same untouched
+    file.  This normalizes ctime only for the initial path-to-descriptor
+    boundary.  The descriptor's pre/post-read states and the path's pre/post-
+    read states use the strict comparator, so metadata races still fail closed.
+    """
+    _assert_same_state(
+        replace(expected_path, ctime_ns=observed_descriptor.ctime_ns), observed_descriptor
+    )
 
 
 def _is_reparse_point(info: os.stat_result) -> bool:
