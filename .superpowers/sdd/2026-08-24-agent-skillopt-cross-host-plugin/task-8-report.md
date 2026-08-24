@@ -61,3 +61,44 @@ host CLI surfaces are freshly verified. No actual host installation, discovery,
 enablement, execution, remote fetch, or OpenClaw runtime behavior is verified.
 Such claims require separate authorization and a new observation after the
 corresponding host action.
+
+## Post-Hermes source-contract repair — final verification
+
+Fresh evidence was collected on Windows on 2026-08-25 from repaired commit
+`ca659ab0de5c63a22b5db66c27f95f94fefdf5da`, before this evidence-only update.
+All source-first commands used
+`C:\Users\33384\Documents\ChatGPT\Agent-SkillOpt\.venv\Scripts\python.exe`
+with this worktree's `src` on `PYTHONPATH`.
+
+| Command | Result |
+| --- | --- |
+| `python -m compileall src skills/agent-skillopt/scripts` | Exit 0; source grammar/bytecode compilation passed. |
+| `python -m pytest tests -v` | Exit 0; **180 passed** in 6.57 s. |
+| `python -m ruff check src tests scripts/validate_bundle.py skills/agent-skillopt/scripts/scaffold_bundle.py` | Exit 0; `All checks passed!`. |
+| `python scripts/validate_bundle.py .` | Exit 0; `VALID`. |
+| `git diff --check` | Exit 0; no output. |
+| Git-Bash `bash -n scripts/validate.sh` | Exit 0. |
+| Git-Bash `scripts/validate.sh` with the required venv first on `PATH` | Exit 0; 180 passed, `VALID`, and `All checks passed!`. |
+
+The required Windows Python 3.12 wrapper renders both exited 0 without
+`--execute`:
+
+| Render-only command | Exact bounded result |
+| --- | --- |
+| `...\\Python312\\python.exe skills\\agent-skillopt\\scripts\\scaffold_bundle.py install --host codex --path .` | JSON emitted `network_required: false` and the two planned Codex argv arrays; neither array ran. |
+| `...\\Python312\\python.exe skills\\agent-skillopt\\scripts\\scaffold_bundle.py install --host hermes --path . --source owner/repository` | JSON emitted `network_required: true` and planned `hermes plugins install owner/repository --no-enable` followed by `hermes plugins enable agent-skillopt`; neither array ran. The accepted `owner/repository` value is the repaired Hermes source grammar evidence, not a remote fetch or installation result. |
+
+Approved host read-only surfaces were refreshed without state changes:
+
+| Host command or check | Result |
+| --- | --- |
+| `codex plugin list --available --json` | Exit 0; parsed 11 installed and 181 available entries, with `version` fields on 192 entries. It is catalogue-read evidence only. |
+| `claude plugin validate . --strict` | Exit 0; marketplace manifest validation printed `Validation passed`. |
+| `hermes plugins --help` | Exit 0; describes portable Agent Plugins v1 packages and lists `install`/`enable` command families. |
+| `hermes skills --help` | Exit 0; displayed its skills-management command family. |
+| OpenClaw PATH availability check | Exit 1 with `openclaw-path=absent`; no `openclaw` executable was invoked. |
+
+Residual scope is unchanged: this proves source validation, strict Claude
+manifest validation, read-only CLI availability, and render-only plan grammar.
+It does not prove actual marketplace addition, installation, remote fetching,
+enablement, discovery, runtime execution, restart, or OpenClaw behavior.
