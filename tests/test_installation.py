@@ -383,13 +383,28 @@ def test_stable_file_rejects_descriptor_ctime_that_changes_while_reading(
     assert observations == 2
 
 
-def test_path_state_comparisons_still_reject_a_ctime_only_difference():
+def test_stable_file_rejects_a_final_path_ctime_only_difference(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path
+):
     import agent_skillopt.installation as installation
 
-    original = installation._EntryState(1, 2, stat.S_IFREG, 3, 4, 5)
+    original_regular_file_state = installation._regular_file_state
+    observations = 0
+
+    def path_state_with_final_ctime_change(path: Path):
+        nonlocal observations
+        observations += 1
+        state = original_regular_file_state(path)
+        if observations == 2:
+            return replace(state, ctime_ns=state.ctime_ns + 1)
+        return state
+
+    monkeypatch.setattr(installation, "_regular_file_state", path_state_with_final_ctime_change)
 
     with pytest.raises(SpecError, match="changed during snapshot"):
-        installation._assert_same_state(original, replace(original, ctime_ns=6))
+        installation._read_stable_file(valid_bundle / "plugin.json")
+
+    assert observations == 2
 
 
 def test_build_plan_rejects_identity_file_change_during_snapshot_capture(
