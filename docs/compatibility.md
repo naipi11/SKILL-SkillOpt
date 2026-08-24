@@ -1,28 +1,24 @@
-# 兼容性矩阵
+# 兼容性与本机证据
 
-本表只记录已经执行过的本地验证，或已配置且实际由 CI 执行过的组合。未列出的
-系统、Agent 宿主、模型或上游提交均不应被理解为受支持。
+0.2.0 以 [Agent Plugins v1](https://agent-plugins.org/specification) 为一个便携核心，并提供
+Codex、Claude Code、Hermes Agent、OpenClaw 四个适配面。结构校验不等于安装、启用或运行成功。
 
-## 当前验证证据
-
-| 层级 | 组合 | 证据 | 状态 |
+| 范围 | 实际命令/契约 | 本机证据（Windows，2026-08-25） | 状态 |
 | --- | --- | --- | --- |
-| 本地开发 | Windows + Python 3.11 | 本仓库离线 pytest 与静态验证 | 已验证 |
-| 上游集成目标 | Microsoft SkillOpt 9c776fcb51ae681c046d6f619b55e5f337d4f900 | 需要 scripts/train.py、SearchQA config 与 openai_compatible_backend.py | 配置目标，待本地检出验证 |
-| 提供商 | HTTPS OpenAI-compatible endpoint | 仅接口契约；未进行付费 live 测试 | 未验证 |
+| 根结构 | `python scripts/validate_bundle.py .` | 退出 0，输出 `VALID`；仅检查清单和共享 Skill 结构。 | 已验证；未本机安装验证 |
+| Codex CLI | `codex plugin --help` | 退出 0；显示 `add`、`list`、`marketplace`、`remove`。 | CLI 可用；未本机安装验证 |
+| Claude Code | `claude plugin validate . --strict` | 退出 0，`Validation passed`；只校验 marketplace 清单。 | 清单已验证；未本机安装验证 |
+| Hermes Agent | `hermes plugins --help`、`hermes skills --help` | 均退出 0；plugins 帮助列出 portable Agent Plugins v1 packages、`install`、`enable`。 | CLI 可用；未本机安装验证 |
+| OpenClaw | [bundle contract](https://docs.openclaw.ai/plugins/bundles) | 本机没有 `openclaw` CLI；未执行 install、inspect 或 gateway restart。 | 合约目标；未本机安装验证 |
 
-## CI 覆盖计划
+同一稳定目录中，`python -m agent_skillopt install --host codex --path .` 已只读渲染 token 和
+步骤。编辑包时，安装计划的稳定快照会故意拒绝变化并要求重新渲染；这不是安装成功证据。没有
+运行 marketplace add、install、enable、inspect、restart 或远程获取。
 
-仓库 CI 定义 Windows 和 Ubuntu 上的 Python 3.10、3.12 编译、测试与 Ruff，并在
-Ubuntu 验证 shell 脚本语法。CI 尚未在远端运行之前，这些条目不是已验证的兼容性
-声明。
+- Codex CLI 证据和权限边界见[官方插件说明](https://help.openai.com/en/articles/20001256-plugins-in-codex/)。
+- Claude 的 marketplace/清单语义见[插件参考](https://code.claude.com/docs/en/plugins-reference)。
+- Hermes 的便携包和 Git source 语义见其[插件文档](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)。
+- OpenClaw 0.2.0 没有原生 `openclaw.plugin.json` 或 runtime code；兼容发现不是运行时承诺。
 
-## 不在承诺范围内
-
-- 不承诺 PyPI SkillOpt v0.2.0 能使用本项目的 OpenAI-compatible 训练路径。
-- 不承诺任意模型、端点或别名都具有相同行为。
-- 不承诺 SKILL.md 在所有 Agent 宿主、IDE 或运行器中产生相同的行为。
-- 不承诺未知的上游提交；doctor 会把特征缺失判为错误，把不同的提交判为未验证。
-
-新增兼容条目时，请记录操作系统、Python 版本、Agent-SkillOpt 版本、上游 revision、
-实际运行命令的脱敏版本，以及测试或 CI 证据。
+只有操作者另行授权实际宿主操作、使用刚渲染的 token 并观察目标宿主结果，才能更新为“本机
+安装验证”。

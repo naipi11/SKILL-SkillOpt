@@ -4,9 +4,7 @@
 
 <h1 align="center">Agent-SkillOpt</h1>
 
-<p align="center">
-  安全地连接 Agent、技能优化与可复现实验证据
-</p>
+<p align="center">用一次明确确认，创建并离线验证可移植的四宿主 Skill 包</p>
 
 <p align="center">
   <a href="https://github.com/naipi11/Agent-SkillOpt/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/naipi11/Agent-SkillOpt/actions/workflows/ci.yml/badge.svg"></a>
@@ -14,73 +12,78 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-2ea44f.svg"></a>
 </p>
 
-面向中文使用者的 Microsoft SkillOpt 集成、诊断、可复现实验与证据报告工具包。
+Agent-SkillOpt 是中文优先的离线 Skill 创作器：一个可移植的 [Agent Plugins v1
+核心](https://agent-plugins.org/specification)，加四个薄适配面——Codex marketplace、Claude
+Code marketplace、Hermes Agent 便携包、OpenClaw 兼容包发现。创建和验证不会发起网络、读取
+secret、安装依赖或执行生成 Skill 的脚本。
 
-Agent-SkillOpt 是一个轻量集成层：它读取本地 YAML 配置，检查用户自己管理的
-SkillOpt 检出，渲染安全的上游调用，并保存脱敏的运行证据。它不 fork 上游优化
-核心，不会修改上游文件，也不会默认访问网络、下载数据或消耗模型 API 额度。
+## 安全工作流
 
-## 当前目标
+唯一流程是：自然语言 brief → stdin `preview` → 检查返回的目录、文件、resources、token →
+**一次明确确认** → 精确 `apply` → 离线 `validate` → 为所选宿主渲染 `install`。实际宿主执行
+是单独的外部状态变更，必须再次明确请求并提供与新安装计划匹配的 token。
 
-- P0：安装、配置、doctor 与不覆盖已有文件的初始化。
-- P1：无网络 dry-run、显式网络门禁与脱敏 manifest。
-- P2：不伪造指标的报告、baseline/candidate/holdout 证据契约。
+以下是「写发布说明」的本地 preview。源检出中 `$skillDirectory` 是仓库的绝对路径；在已安装
+插件中，必须改为当前所用 `SKILL.md` 所在的绝对目录，不能假设当前目录或检出位置。
 
-通用 OpenAI-compatible 训练后端以 Microsoft SkillOpt 提交
-9c776fcb51ae681c046d6f619b55e5f337d4f900 为首个兼容基线。
-PyPI v0.2.0 早于该后端，不能用于此兼容训练路径。
+```powershell
+$skillDirectory = (Resolve-Path .\skills\agent-skillopt).Path
+$bundleRoot = Join-Path (Get-Location) 'out\release-notes'
+$spec = @'
+{
+  "name": "release-notes",
+  "description": "从已核实的变更起草简洁发布说明。",
+  "body": "先收集已核实的变更，再起草发布说明。",
+  "output_directory": "REPLACE_WITH_ABSOLUTE_BUNDLE_ROOT"
+}
+'@.Replace('REPLACE_WITH_ABSOLUTE_BUNDLE_ROOT', $bundleRoot.Replace('\\', '\\\\'))
+$spec | python "$skillDirectory\scripts\scaffold_bundle.py" preview --spec -
+```
 
-## 安装
+检查返回 JSON 的 `path`、`files`、可选 `resources` 和 `confirmation_token`。预览不会创建输出
+目录。只有它们完全正确时，才原样使用该 token：
 
-需要 Python 3.10 或更高版本。下面的安装步骤只解析 Python 依赖；不会连接模型
-提供商，也不会读取或输出任何 API 密钥。
+```powershell
+$spec | python "$skillDirectory\scripts\scaffold_bundle.py" apply --spec - --confirm <preview-token>
+python "$skillDirectory\scripts\scaffold_bundle.py" validate --path "$bundleRoot"
+```
 
-    python -m pip install -e ".[dev]"
+`apply` 不覆盖现有目录。它在同级唯一 staging 目录写入并验证，随后才无覆盖发布；失败会清理
+自己的 staging（受系统锁阻止时会报告残留路径）。验证失败时不要安装。
 
-## 默认无网络工作流
+## 仅渲染安装计划
 
-首先查看命令和创建项目配置：
+选择一个宿主后，下面命令只返回 argv 数组、网络标记和安装 token，属于 **PLAN ONLY**：
 
-    agent-skillopt --help
-    agent-skillopt init --path .
+```powershell
+python "$skillDirectory\scripts\scaffold_bundle.py" install --host <codex|claude|hermes|openclaw> --path "$bundleRoot"
+```
 
-在准备好本地 SkillOpt 检出和数据目录后，仅做本地检查与命令渲染：
+每一步是一个 argv 元组，路径永远是一个参数而不是 shell 拼接。`<bundle-root>` 必须替换为
+已经 preview/validate 的绝对目录，`release-notes` 替换为规范化包名；以下命令严格对应
+`build_install_plan` 的渲染：
 
-    agent-skillopt doctor --config agent-skillopt.yaml
-    agent-skillopt run --config agent-skillopt.yaml --dry-run
+| 宿主 | 计划 argv（只能在后续独立确认后执行） |
+| --- | --- |
+| [Codex](https://help.openai.com/en/articles/20001256-plugins-in-codex/) | `codex plugin marketplace add <bundle-root>`<br>`codex plugin add release-notes@release-notes` |
+| [Claude Code](https://code.claude.com/docs/en/plugins-reference) | `claude plugin marketplace add <bundle-root>`<br>`claude plugin install release-notes@release-notes` |
+| [Hermes Agent](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins) | `hermes plugins install <owner>/<repository> --no-enable`<br>`hermes plugins enable release-notes` |
+| [OpenClaw](https://docs.openclaw.ai/plugins/bundles) | `openclaw plugins install <bundle-root>`<br>`openclaw plugins inspect release-notes`<br>`openclaw gateway restart` |
 
-dry-run 不启动子进程、不发起网络请求，也不要求已设置密钥。它只显示经过脱敏的
-上游命令并提示缺失的非公开前置条件。
+Hermes 需要 Git source（不是本地路径），会访问网络且远程内容可变。**Hermes Git install/enable
+和 OpenClaw gateway restart 都是外部状态变更，绝不能因“渲染计划”自动执行。** Codex 与
+Claude 的 marketplace/add/install 也会改变用户级宿主状态。安装 token 绑定宿主、已验证路径、
+内容快照、命令及 Hermes source，但不 pin 远端 commit，也不能替代权限和来源审查。
 
-## 真正运行前的门禁
+## 本地验证
 
-只有在你已单独批准以下范围后，才可以使用带有 allow-network 的运行命令：
+```powershell
+python -m compileall src
+python -m pytest tests -v
+python scripts/validate_bundle.py .
+python -m ruff check src tests
+```
 
-1. 具体模型、预算与并发。
-2. 将要发往提供商的数据、轨迹或样本范围。
-3. 提供商的数据处理、保留与计费政策。
-
-运行时仅使用配置中声明的环境变量名（例如 DEEPSEEK_API_KEY）。密钥值不得写入
-YAML、命令行、日志、测试、manifest 或 Git 历史。
-
-## 上游与数据
-
-请自行维护 Microsoft SkillOpt 本地检出。Agent-SkillOpt 只检查其路径、版本和所需
-文件，绝不自动 clone、patch 或下载。SearchQA 数据准备应调用上游的材料化工具；
-本项目不复制基准数据。
-
-## 兼容性与安全
-
-- 已验证和待验证环境见 docs/compatibility.md。
-- 数据外发、密钥与漏洞处理见 docs/security.md。
-- 实验指标与授权规则见 docs/evaluation.md 和 docs/experiment-checklist.md。
-- SKILL.md 只声明已验证的操作契约，不声称可在所有 Agent 宿主中完全一致运行。
-
-## 开发验证
-
-    python -m compileall src
-    python -m pytest tests -v
-    python -m ruff check src tests
-    bash -n scripts/validate.sh
-
-许可证：MIT。Microsoft SkillOpt 的归属与边界见 NOTICE。
+CI 在 Windows 与 Ubuntu 的 Python 3.10、3.12 执行离线检查，且不会下载宿主 CLI。请阅读
+[兼容性矩阵](docs/compatibility.md)、[安全边界](docs/security.md) 与
+[0.2.0 迁移说明](docs/migration-v0.2.md)。许可证：MIT。

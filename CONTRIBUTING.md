@@ -11,5 +11,6 @@
 
     python -m compileall src
     python -m pytest tests -v
+    python scripts/validate_bundle.py .
     python -m ruff check src tests
     bash -n scripts/validate.sh
