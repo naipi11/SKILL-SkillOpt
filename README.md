@@ -19,7 +19,7 @@ secret、安装依赖或执行生成 Skill 的脚本。
 
 ## 安全工作流
 
-唯一流程是：自然语言 brief → stdin `preview` → 检查返回的目录、文件、resources、token →
+唯一流程是：自然语言 brief → stdin `preview` → 检查返回的目录、文件、token →
 **一次明确确认** → 精确 `apply` → 离线 `validate` → 为所选宿主渲染 `install`。实际宿主执行
 是单独的外部状态变更，必须再次明确请求并提供与新安装计划匹配的 token。
 
@@ -40,8 +40,9 @@ $spec = @'
 $spec | python "$skillDirectory\scripts\scaffold_bundle.py" preview --spec -
 ```
 
-检查返回 JSON 的 `path`、`files`、可选 `resources` 和 `confirmation_token`。预览不会创建输出
-目录。只有它们完全正确时，才原样使用该 token：
+检查返回 JSON 的 `output_directory`、`files` 和 `confirmation_token`。预览不会创建输出目录；
+可选 resource 没有顶层 `resources` 字段，而是 `files` 中的资源路径条目。只有它们完全正确时，
+才原样使用该 token：
 
 ```powershell
 $spec | python "$skillDirectory\scripts\scaffold_bundle.py" apply --spec - --confirm <preview-token>
@@ -53,10 +54,17 @@ python "$skillDirectory\scripts\scaffold_bundle.py" validate --path "$bundleRoot
 
 ## 仅渲染安装计划
 
-选择一个宿主后，下面命令只返回 argv 数组、网络标记和安装 token，属于 **PLAN ONLY**：
+Codex、Claude 和 OpenClaw 的本地包计划不需要 source；下面命令只返回 argv 数组、网络标记和
+安装 token，属于 **PLAN ONLY**：
 
 ```powershell
-python "$skillDirectory\scripts\scaffold_bundle.py" install --host <codex|claude|hermes|openclaw> --path "$bundleRoot"
+python "$skillDirectory\scripts\scaffold_bundle.py" install --host <codex|claude|openclaw> --path "$bundleRoot"
+```
+
+Hermes 必须提供 Git source；这同样只渲染计划，不访问网络或执行宿主命令：
+
+```powershell
+python "$skillDirectory\scripts\scaffold_bundle.py" install --host hermes --path "$bundleRoot" --source <owner>/<repository>
 ```
 
 每一步是一个 argv 元组，路径永远是一个参数而不是 shell 拼接。`<bundle-root>` 必须替换为

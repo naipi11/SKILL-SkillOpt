@@ -32,8 +32,9 @@ description: Create review-gated portable Skill packages for coding agents.
 <JSON specification> | python <absolute-SKILL-directory>/scripts/scaffold_bundle.py preview --spec -
 ```
 
-展示预览返回的输出目录、全部文件、每项可选资源及确认令牌。随后立即停止，等待用户对该
-提案做出明确批准。不得在用户批准前调用 apply。
+展示预览 JSON 的 `output_directory`、全部 `files` 和 `confirmation_token`。可选资源是
+`files` 中的路径条目，不存在顶层 `resources` 字段。随后立即停止，等待用户对该提案做出
+明确批准。不得在用户批准前调用 apply。
 
 批准后，使用同一份完整 JSON 规格和预览返回的完全一致令牌：
 
@@ -47,10 +48,16 @@ python <absolute-SKILL-directory>/scripts/scaffold_bundle.py validate --path <cr
 
 ## 仅渲染安装计划
 
-离线验证成功后，询问用户选择一个宿主，并仅渲染该宿主的安装计划：
+离线验证成功后，询问用户选择一个宿主。Codex、Claude 和 OpenClaw 仅渲染本地包计划：
 
 ```text
-python <absolute-SKILL-directory>/scripts/scaffold_bundle.py install --host <codex|claude|hermes|openclaw> --path <created-bundle>
+python <absolute-SKILL-directory>/scripts/scaffold_bundle.py install --host <codex|claude|openclaw> --path <created-bundle>
+```
+
+Hermes 必须声明 Git source；下面命令也只渲染计划，远端内容可变且在实际执行时需要网络：
+
+```text
+python <absolute-SKILL-directory>/scripts/scaffold_bundle.py install --host hermes --path <created-bundle> --source <owner>/<repository>
 ```
 
 说明渲染出的命令和网络边界，参考 [host-installation](references/host-installation.md)。

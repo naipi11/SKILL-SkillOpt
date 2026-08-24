@@ -11,9 +11,11 @@ Codex、Claude Code、Hermes Agent、OpenClaw 四个适配面。结构校验不�
 | Hermes Agent | `hermes plugins --help`、`hermes skills --help` | 均退出 0；plugins 帮助列出 portable Agent Plugins v1 packages、`install`、`enable`。 | CLI 可用；未本机安装验证 |
 | OpenClaw | [bundle contract](https://docs.openclaw.ai/plugins/bundles) | 本机没有 `openclaw` CLI；未执行 install、inspect 或 gateway restart。 | 合约目标；未本机安装验证 |
 
-同一稳定目录中，`python -m agent_skillopt install --host codex --path .` 已只读渲染 token 和
-步骤。编辑包时，安装计划的稳定快照会故意拒绝变化并要求重新渲染；这不是安装成功证据。没有
-运行 marketplace add、install、enable、inspect、restart 或远程获取。
+同一稳定目录中，通过项目随 Skill 分发的包装器执行
+`python skills/agent-skillopt/scripts/scaffold_bundle.py install --host codex --path .` 已只读渲染
+token 和步骤。该命令从仓库根目录运行，包装器优先使用其自身的 `src`，不会使用旧的全局或
+venv console entry point。编辑包时，安装计划的稳定快照会故意拒绝变化并要求重新渲染；这不是
+安装成功证据。没有运行 marketplace add、install、enable、inspect、restart 或远程获取。
 
 - Codex CLI 证据和权限边界见[官方插件说明](https://help.openai.com/en/articles/20001256-plugins-in-codex/)。
 - Claude 的 marketplace/清单语义见[插件参考](https://code.claude.com/docs/en/plugins-reference)。
