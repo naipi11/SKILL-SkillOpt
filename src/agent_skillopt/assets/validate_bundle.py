@@ -66,6 +66,25 @@ class LinkProbeResult(Enum):
 def validate(root: Path) -> list[tuple[str, Path, str]]:
     root = Path(root)
     issues: list[tuple[str, Path, str]] = []
+    root_probe = probe_link_or_reparse_point(root)
+    if root_probe is LinkProbeResult.LINK:
+        return [
+            (
+                "BUNDLE_ROOT_LINK_INVALID",
+                root,
+                "bundle root cannot be a link or reparse point",
+            )
+        ]
+    if root_probe is LinkProbeResult.ERROR:
+        return [
+            (
+                "BUNDLE_ROOT_PROBE_INVALID",
+                root,
+                "bundle root metadata cannot be inspected",
+            )
+        ]
+    if root_probe is LinkProbeResult.MISSING:
+        return [("BUNDLE_ROOT_INVALID", root, "bundle root must be a directory")]
     if not root.is_dir():
         return [("BUNDLE_ROOT_INVALID", root, "bundle root must be a directory")]
     resolved_root = root.resolve()

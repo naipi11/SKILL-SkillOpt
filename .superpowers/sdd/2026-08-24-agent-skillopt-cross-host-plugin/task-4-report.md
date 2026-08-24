@@ -273,3 +273,50 @@ The suite simulates metadata probe errors rather than inducing filesystem
 permission faults or privileged live NTFS junctions. It directly verifies the
 same Python exception boundaries and exact validator output; behavior of a
 specific Windows filesystem driver can still vary outside this local contract.
+
+## Repair round 6 — reject linked bundle-root entries
+
+- Added seven focused regressions before implementation. Against the prior
+  repair, `python -m pytest tests/test_validation.py -k "symlinked_bundle_root
+  or unsafe_root_probe or missing_bundle_root" -v` selected seven tests: six
+  failed because validation entered `is_dir()`/`resolve()` and traversed the
+  supplied root, while the missing-root control passed.
+- `validate_bundle()` and the self-contained `validate()` now invoke the
+  shared no-follow link/reparse probe on the direct supplied root before any
+  `is_dir()` or `resolve()` call. A symlink, junction, or `lstat` reparse point
+  returns the deterministic `BUNDLE_ROOT_LINK_INVALID`; a non-missing probe
+  error returns `BUNDLE_ROOT_PROBE_INVALID`; a missing root retains the
+  existing `BUNDLE_ROOT_INVALID` result.
+- The actual temporary root-symlink regression passed on this Windows host.
+  Simulated junction, reparse, `is_symlink()` error, `is_junction()` error, and
+  `lstat()` error paths assert that no `is_dir()`, `resolve()`, `iterdir()`,
+  content read, or `os.walk()` traversal occurs. They also assert exact output
+  parity between the library validator and the self-contained root wrapper.
+- The packaged asset, root wrapper, and minimal-fixture wrapper were updated
+  in lockstep and remain byte-identical. The root check applies only to the
+  direct package entry; it deliberately does not inspect ancestor components.
+
+## Repair round 6 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- Targeted root-entry TDD group — 7 passed (initially 6 failed, 1 passed).
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  65 passed.
+- `python -m pytest tests -v` — 77 passed.
+- `python -m compileall -q src tests scripts` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- SHA-256 of packaged asset, root wrapper, and fixture wrapper — all
+  `FE542EC3E92BF8B1B88E35A10621C2662EF04EDD6E71FCC021572BB63E850C39`.
+- `git diff --check` — passed before commit.
+
+## Repair round 6 residual risk
+
+The real root-symlink path was exercised locally. Junction/reparse and
+metadata-error branches remain intentionally simulated where Windows privileges
+or filesystem behavior could make a live fixture unreliable; those simulations
+cover the exact no-follow Python probe boundaries and verify no later root
+access occurs.

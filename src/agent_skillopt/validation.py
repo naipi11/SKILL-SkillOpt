@@ -92,6 +92,25 @@ def validate_bundle(root: Path) -> tuple[ValidationIssue, ...]:
     """Inspect a bundle without executing its content or using external services."""
     bundle_root = Path(root)
     issues: list[ValidationIssue] = []
+    root_probe = _probe_link_or_reparse_point(bundle_root)
+    if root_probe is _LinkProbeResult.LINK:
+        return (
+            _issue(
+                "BUNDLE_ROOT_LINK_INVALID",
+                bundle_root,
+                "bundle root cannot be a link or reparse point",
+            ),
+        )
+    if root_probe is _LinkProbeResult.ERROR:
+        return (
+            _issue(
+                "BUNDLE_ROOT_PROBE_INVALID",
+                bundle_root,
+                "bundle root metadata cannot be inspected",
+            ),
+        )
+    if root_probe is _LinkProbeResult.MISSING:
+        return (_issue("BUNDLE_ROOT_INVALID", bundle_root, "bundle root must be a directory"),)
     if not bundle_root.is_dir():
         return (_issue("BUNDLE_ROOT_INVALID", bundle_root, "bundle root must be a directory"),)
 

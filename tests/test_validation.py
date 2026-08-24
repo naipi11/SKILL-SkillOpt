@@ -682,3 +682,205 @@ def test_validator_reports_a_missing_skills_directory_as_layout_invalid(minimal_
 
     assert "SKILL_DIRECTORY_COUNT_INVALID" in codes
     assert "PATH_LINK_PROBE_INVALID" not in codes
+
+
+def test_validator_rejects_a_symlinked_bundle_root_before_accessing_it(
+    minimal_bundle: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root_link = tmp_path / "minimal-skill-link"
+    try:
+        root_link.symlink_to(minimal_bundle, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this host")
+
+    original_is_dir = Path.is_dir
+    original_resolve = Path.resolve
+    original_iterdir = Path.iterdir
+    original_read_text = Path.read_text
+    original_walk = validation.os.walk
+    accesses: list[str] = []
+
+    def is_root_or_descendant(path: Path) -> bool:
+        return path == root_link or root_link in path.parents
+
+    def tracking_is_dir(path: Path) -> bool:
+        if path == root_link:
+            accesses.append("is_dir")
+        return original_is_dir(path)
+
+    def tracking_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+        if path == root_link:
+            accesses.append("resolve")
+        return original_resolve(path, *args, **kwargs)
+
+    def tracking_iterdir(path: Path):
+        if is_root_or_descendant(path):
+            accesses.append("iterdir")
+        return original_iterdir(path)
+
+    def tracking_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if is_root_or_descendant(path):
+            accesses.append("read_text")
+        return original_read_text(path, *args, **kwargs)
+
+    def tracking_walk(root: Path, *args: object, **kwargs: object):
+        if root == root_link:
+            accesses.append("walk")
+        return original_walk(root, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", tracking_is_dir)
+    monkeypatch.setattr(Path, "resolve", tracking_resolve)
+    monkeypatch.setattr(Path, "iterdir", tracking_iterdir)
+    monkeypatch.setattr(Path, "read_text", tracking_read_text)
+    monkeypatch.setattr("agent_skillopt.validation.os.walk", tracking_walk)
+
+    output = [(issue.code, issue.path, issue.message) for issue in validate_bundle(root_link)]
+
+    assert accesses == []
+    assert output == [
+        (
+            "BUNDLE_ROOT_LINK_INVALID",
+            root_link,
+            "bundle root cannot be a link or reparse point",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_code", "expected_message"),
+    (
+        ("junction", "BUNDLE_ROOT_LINK_INVALID", "bundle root cannot be a link or reparse point"),
+        ("reparse", "BUNDLE_ROOT_LINK_INVALID", "bundle root cannot be a link or reparse point"),
+        ("is_symlink", "BUNDLE_ROOT_PROBE_INVALID", "bundle root metadata cannot be inspected"),
+        ("is_junction", "BUNDLE_ROOT_PROBE_INVALID", "bundle root metadata cannot be inspected"),
+        ("lstat", "BUNDLE_ROOT_PROBE_INVALID", "bundle root metadata cannot be inspected"),
+    ),
+)
+def test_validator_rejects_unsafe_root_probe_before_accessing_it(
+    minimal_bundle: Path,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    expected_code: str,
+    expected_message: str,
+):
+    original_is_symlink = Path.is_symlink
+    original_is_junction = getattr(Path, "is_junction", None)
+    original_lstat = Path.lstat
+    original_is_dir = Path.is_dir
+    original_resolve = Path.resolve
+    original_iterdir = Path.iterdir
+    original_read_text = Path.read_text
+    original_walk = validation.os.walk
+    accesses: list[str] = []
+
+    def false_is_symlink(path: Path) -> bool:
+        if path == minimal_bundle:
+            return False
+        return original_is_symlink(path)
+
+    def false_is_junction(path: Path) -> bool:
+        if path == minimal_bundle or original_is_junction is None:
+            return False
+        return original_is_junction(path)
+
+    def failing_is_symlink(path: Path) -> bool:
+        if path == minimal_bundle:
+            raise OSError("root probe failed")
+        return original_is_symlink(path)
+
+    def failing_is_junction(path: Path) -> bool:
+        if path == minimal_bundle:
+            raise OSError("root probe failed")
+        if original_is_junction is None:
+            return False
+        return original_is_junction(path)
+
+    def reparse_lstat(path: Path, *args: object, **kwargs: object) -> object:
+        if path == minimal_bundle:
+            return SimpleNamespace(st_file_attributes=0x0400)
+        return original_lstat(path, *args, **kwargs)
+
+    def failing_lstat(path: Path, *args: object, **kwargs: object) -> object:
+        if path == minimal_bundle:
+            raise OSError("root probe failed")
+        return original_lstat(path, *args, **kwargs)
+
+    def tracking_is_dir(path: Path) -> bool:
+        if path == minimal_bundle:
+            accesses.append("is_dir")
+        return original_is_dir(path)
+
+    def tracking_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+        if path == minimal_bundle:
+            accesses.append("resolve")
+        return original_resolve(path, *args, **kwargs)
+
+    def tracking_iterdir(path: Path):
+        if path == minimal_bundle or minimal_bundle in path.parents:
+            accesses.append("iterdir")
+        return original_iterdir(path)
+
+    def tracking_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == minimal_bundle or minimal_bundle in path.parents:
+            accesses.append("read_text")
+        return original_read_text(path, *args, **kwargs)
+
+    def tracking_walk(root: Path, *args: object, **kwargs: object):
+        if root == minimal_bundle:
+            accesses.append("walk")
+        return original_walk(root, *args, **kwargs)
+
+    if operation == "junction":
+        monkeypatch.setattr(Path, "is_symlink", false_is_symlink)
+        monkeypatch.setattr(
+            Path,
+            "is_junction",
+            lambda path: path == minimal_bundle or false_is_junction(path),
+            raising=False,
+        )
+    elif operation == "reparse":
+        monkeypatch.setattr(Path, "is_symlink", false_is_symlink)
+        monkeypatch.setattr(Path, "is_junction", false_is_junction, raising=False)
+        monkeypatch.setattr(Path, "lstat", reparse_lstat)
+    elif operation == "is_symlink":
+        monkeypatch.setattr(Path, "is_symlink", failing_is_symlink)
+    elif operation == "is_junction":
+        monkeypatch.setattr(Path, "is_symlink", false_is_symlink)
+        monkeypatch.setattr(Path, "is_junction", failing_is_junction, raising=False)
+    else:
+        monkeypatch.setattr(Path, "is_symlink", false_is_symlink)
+        monkeypatch.setattr(Path, "is_junction", false_is_junction, raising=False)
+        monkeypatch.setattr(Path, "lstat", failing_lstat)
+    monkeypatch.setattr(Path, "is_dir", tracking_is_dir)
+    monkeypatch.setattr(Path, "resolve", tracking_resolve)
+    monkeypatch.setattr(Path, "iterdir", tracking_iterdir)
+    monkeypatch.setattr(Path, "read_text", tracking_read_text)
+    monkeypatch.setattr("agent_skillopt.validation.os.walk", tracking_walk)
+
+    library_output = [
+        (issue.code, issue.path, issue.message) for issue in validate_bundle(minimal_bundle)
+    ]
+    standalone = runpy.run_path(str(project_root / "tests" / "validate_bundle.py"))
+    standalone_output = standalone["validate"](minimal_bundle)
+
+    assert accesses == []
+    assert library_output == standalone_output == [
+        (expected_code, minimal_bundle, expected_message)
+    ]
+
+
+def test_validator_preserves_missing_bundle_root_semantics(
+    tmp_path: Path, project_root: Path
+):
+    missing_root = tmp_path / "missing-bundle"
+
+    library_output = [
+        (issue.code, issue.path, issue.message) for issue in validate_bundle(missing_root)
+    ]
+    standalone = runpy.run_path(str(project_root / "tests" / "validate_bundle.py"))
+    standalone_output = standalone["validate"](missing_root)
+
+    assert library_output == standalone_output == [
+        ("BUNDLE_ROOT_INVALID", missing_root, "bundle root must be a directory")
+    ]
