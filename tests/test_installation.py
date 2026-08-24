@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from shutil import copytree
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ import pytest
 from agent_skillopt.cli import main
 from agent_skillopt.errors import ConfirmationError, SpecError
 from agent_skillopt.installation import build_install_plan, execute_install
+from agent_skillopt.models import InstallPlan
 from agent_skillopt.validation import BundleValidationError
 
 
@@ -185,6 +187,122 @@ def test_execute_install_rejects_a_root_that_becomes_a_link_without_a_runner(
         execute_install(plan, plan.confirmation_token, calls.append)
 
     assert calls == []
+
+
+def test_execute_install_rebuilds_a_forged_plan_before_any_runner(valid_bundle: Path):
+    rendered = build_install_plan("codex", valid_bundle, None)
+    forged = InstallPlan(
+        host="codex",
+        steps=(("untrusted-program", "--do-the-thing"),),
+        confirmation_token="attacker-selected-token",
+        network_required=False,
+        bundle_root=rendered.bundle_root,
+        bundle_fingerprint=rendered.bundle_fingerprint,
+        bundle_root_identity=rendered.bundle_root_identity,
+        bundle_name=rendered.bundle_name,
+        source=None,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    with pytest.raises(ConfirmationError, match="stale"):
+        execute_install(forged, forged.confirmation_token, calls.append)
+
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "steps",
+        "host",
+        "network_required",
+        "source",
+        "bundle_root",
+        "bundle_fingerprint",
+        "bundle_root_identity",
+        "bundle_name",
+        "confirmation_token",
+    ),
+)
+def test_execute_install_rejects_each_altered_stored_plan_invariant(
+    field: str, valid_bundle: Path, tmp_path: Path
+):
+    rendered = build_install_plan("hermes", valid_bundle, "owner/repository")
+    replacements: dict[str, object] = {
+        "steps": (("untrusted-program",),),
+        "host": "unsupported-host",
+        "network_required": False,
+        "source": "owner/other-repository",
+        "bundle_root": tmp_path / "other-bundle",
+        "bundle_fingerprint": "0" * 64,
+        "bundle_root_identity": (0, 0),
+        "bundle_name": "other-skill",
+        "confirmation_token": "attacker-selected-token",
+    }
+    forged = replace(rendered, **{field: replacements[field]})
+    calls: list[tuple[str, ...]] = []
+
+    with pytest.raises(ConfirmationError, match="stale"):
+        execute_install(forged, forged.confirmation_token, calls.append)
+
+    assert calls == []
+
+
+def test_execute_install_accepts_a_normal_hermes_plan_after_reconstruction(valid_bundle: Path):
+    plan = build_install_plan("hermes", valid_bundle, "owner/repository")
+    calls: list[tuple[str, ...]] = []
+
+    assert execute_install(plan, plan.confirmation_token, lambda step: calls.append(step) or 0) == 0
+
+    assert calls == list(plan.steps)
+
+
+def test_execute_install_rejects_a_file_that_changes_during_snapshot_capture(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path
+):
+    import agent_skillopt.installation as installation
+
+    plan = build_install_plan("codex", valid_bundle, None)
+    calls: list[tuple[str, ...]] = []
+    original_update = installation._update_fingerprint_file
+    changed = False
+
+    def mutate_after_hash(digest: object, root: Path, path: Path):
+        nonlocal changed
+        state = original_update(digest, root, path)
+        if path.name == "README.md" and not changed:
+            changed = True
+            path.write_text("changed during capture", encoding="utf-8")
+        return state
+
+    monkeypatch.setattr(installation, "_update_fingerprint_file", mutate_after_hash)
+
+    with pytest.raises(ConfirmationError, match="stale"):
+        execute_install(plan, plan.confirmation_token, calls.append)
+
+    assert changed is True
+    assert calls == []
+
+
+def test_build_plan_rejects_identity_file_change_during_snapshot_capture(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path
+):
+    import agent_skillopt.installation as installation
+
+    original_read_identity = installation._read_validated_bundle_name
+
+    def mutate_identity_after_read(root: Path):
+        result = original_read_identity(root)
+        manifest_path = root / "plugin.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["homepage"] = "https://example.test/changed-during-capture"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(installation, "_read_validated_bundle_name", mutate_identity_after_read)
+
+    with pytest.raises(SpecError, match="changed during snapshot"):
+        build_install_plan("codex", valid_bundle, None)
 
 
 def test_execute_install_requires_the_rendered_token(valid_bundle: Path):

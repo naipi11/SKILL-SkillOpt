@@ -134,3 +134,71 @@ remote content is intentionally not revision-pinned, so its execution-time
 fetch remains a user-visible trust boundary. The shared virtual environment's
 stale installed 0.1.x CLI remains a packaging-environment issue; source-first
 checks are used until a later installation/packaging task addresses it.
+
+## Repair round 2 — provenance reconstruction and coherent snapshots
+
+### Scope delivered
+
+- Added immutable bundle_name and source fields to InstallPlan. The
+  confirmation token now binds the validated identity, canonical root, content
+  fingerprint, root identity, selected host, explicit Hermes source, network
+  flag, and exact argv tuples. The CLI JSON contract remains only steps,
+  network_required, and confirmation_token.
+- execute_install() first checks the caller token against the supplied object,
+  then independently rebuilds a complete plan from the current formally
+  validated canonical root and the explicit stored source. It accepts only
+  exact dataclass equality with that rebuilt plan and executes the rebuilt
+  tuples, never the untrusted object's tuples. Unsupported hosts, non-Hermes
+  sources, missing Hermes sources, forged names/roots/fingerprints/identities,
+  changed network flags, altered steps, and arbitrary matching tokens therefore
+  fail before any runner call.
+- A snapshot now keeps no-follow directory metadata before and after direct and
+  canonical validation, reads plugin.json through a stable descriptor,
+  fingerprints sorted files through lstat plus pre-read fstat, post-read fstat,
+  and post-read lstat comparisons, and performs a second complete no-data
+  metadata traversal. It rejects added, removed, relinked, replaced, or
+  metadata-changing entries instead of mixing identity and tree states.
+- When O_NOFOLLOW is available, file descriptors use it. On platforms such as
+  this Windows host where it is unavailable, no descriptor data is read until
+  its fstat exactly matches the prior no-follow lstat; post-read
+  descriptor/path comparisons and the second traversal fail closed on an
+  unexpected link or replacement.
+
+### TDD and fresh evidence
+
+1. Added direct-forgery and mutation tests before the repair. The initial
+   focused run collected 55 tests: 8 new tests failed (forged argv/token,
+   altered stored invariants, and mid-capture mutation), while 47 existing
+   tests passed. The missing explicit source/bundle_name fields also made the
+   direct forged-plan constructor fail at the intended interface boundary.
+2. Added a further identity/tree mixed-snapshot regression after reviewing the
+   first green implementation. It initially failed because changing the root
+   manifest after name capture but before hashing silently produced a mixed
+   snapshot. The snapshot now carries the stable identity-file metadata and
+   compares it with the hashed-tree observation; that regression passed after
+   the repair.
+3. Fresh commands, all with
+   C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe:
+
+   - python -m pytest tests/test_installation.py -v — 56 passed.
+   - python -m ruff check src tests — passed.
+   - python -m compileall -q src tests — passed.
+   - python -m pytest tests -q — 133 passed.
+   - git diff --check — passed.
+   - With PYTHONPATH set to this checkout's src, python -m agent_skillopt
+     --help and the Hermes render-only command from earlier rounds succeeded.
+     The latter omitted --execute, rendered the explicit plan/warning, and
+     performed no host mutation, remote fetch, enablement, inspection, or
+     restart.
+
+### Unresolved boundary
+
+The final reconstruction/snapshot check is immediately before the first
+runner call, but it cannot atomically cover a same-privilege process changing
+the local tree after that check and before a host consumes it. This narrow
+external-host consumption interval is an unavoidable operating-system boundary
+and is not claimed to be pinned or transactional. Hermes still intentionally
+fetches mutable owner/repository content at execution time; the rendered
+warning presents that separate remote trust boundary explicitly. The shared
+virtual environment's stale installed 0.1.x CLI also remains a later packaging
+task concern; source-priority smoke checks avoid treating it as current code.

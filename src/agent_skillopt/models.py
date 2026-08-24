@@ -114,6 +114,8 @@ class InstallPlan:
     bundle_root: Path
     bundle_fingerprint: str
     bundle_root_identity: tuple[int, int]
+    bundle_name: str
+    source: str | None
 
 
 def _required_text(value: object, field: str) -> str:
