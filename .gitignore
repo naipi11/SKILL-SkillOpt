@@ -10,8 +10,6 @@ venv/
 build/
 dist/
 *.egg-info/
-runs/
-.tmp-report/
 .worktrees/
 .env
 .env.*

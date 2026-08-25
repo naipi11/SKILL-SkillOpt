@@ -1,0 +1,322 @@
+# Task 4 — Offline package validation and portable validator copies
+
+## Scope delivered
+
+- Added `agent_skillopt.validation` with deterministic `ValidationIssue`,
+  `validate_bundle`, `assert_valid_bundle`, and aggregate `BundleValidationError`.
+- Validated the exact Agent Plugins v1 schema URL; required root, Codex, and
+  Claude manifests; identity and semantic-version consistency; host
+  `./skills/` declarations; marketplace local-source shape; one matching
+  immediate Skill directory; strict two-field frontmatter; unfinished markers;
+  Markdown parent-path references; and resolved paths which escape the bundle.
+- Added `agent-skillopt validate --path BUNDLE`: it emits `VALID` on success or
+  one `CODE path: message` line per structural issue on standard error and exits
+  one.
+- Added `scripts/validate_bundle.py`, which resolves this checkout's `src/`
+  before delegating to the public CLI command.
+- Replaced the generated validator stub with the exact self-contained
+  `tests/validate_bundle.py` copy. The minimal fixture carries the same copy;
+  it imports only Python standard-library modules.
+- Gated `apply_plan` by formal validation of its staging directory immediately
+  before no-clobber publication.
+
+## TDD evidence
+
+1. Added the fixture and validator contract tests before `validation.py`.
+   `python -m pytest tests/test_validation.py -v` failed at collection with
+   `ModuleNotFoundError: No module named 'agent_skillopt.validation'`.
+2. Added the validator and re-ran that test module: 7 passed.
+3. Added CLI, exact portable-copy, and staging-publication tests before wiring
+   the CLI/copy/gate code. The focused run failed at the expected four
+   boundaries: validate returned the placeholder status, root copy was absent,
+   and invalid staged content was published.
+4. Wired those interfaces and re-ran: 19 focused tests passed.
+5. Direct wrapper verification exposed an import-boundary failure: invoking
+   `scripts/validate_bundle.py` selected an older globally installed package
+   whose CLI lacked `validate`. Added a subprocess regression test first; it
+   failed with exit status 2 and that legacy CLI usage text. The wrapper now
+   prepends this checkout's `src/` before importing the public CLI; its focused
+   regression passed.
+
+## Fresh verification
+
+All commands used
+`C:\Users\33384\Documents\ChatGPT\Agent-SkillOpt\.venv\Scripts\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  20 passed.
+- `python -m pytest tests -v` — 32 passed.
+- `python -m compileall src scripts tests` — passed.
+- `ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `git diff --check` — passed.
+
+## Repair round 3 — repeated escapes and exact identity
+
+- Added focused regressions before implementation. The initial validator run
+  reported five failures for repeated percent-encoded traversal (inline and
+  reference targets), bounded decoding, strict nested JSON types, and optional
+  metadata aggregation. The contained child-symlink regression was then
+  tightened so its valid target remains inside the bundle but outside
+  `skills/`, eliminating a directory-count false positive in the test setup.
+- Percent escapes now normalize repeatedly to a fixed eight-transformation cap.
+  A value which is still changing at the cap fails closed; decoded remote URLs
+  and `mailto` links retain their permitted behavior.
+- Canonical layout validation rejects symlinked `skills/`, immediate
+  `skills/<name>/`, and canonical `SKILL.md` entries before treating them as
+  directories or files. This prevents internal symlinks from being followed as
+  valid package layout.
+- Optional metadata equality now compares JSON recursively with exact runtime
+  types, so nested `true` and `1` are distinct. Required identity comparisons
+  and optional metadata comparisons are separated, preserving optional-drift
+  evidence when an unrelated host required field is malformed.
+- The library and portable asset were changed together; the root wrapper and
+  fixture wrapper are exact self-contained copies.
+
+## Repair round 3 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  50 passed.
+- `python -m pytest tests -v` — 62 passed.
+- `python -m compileall src` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `git diff --check` — passed.
+- SHA-256 of the packaged asset, root wrapper, and fixture wrapper — all
+  `C9DB280B280A89AA446020C05DA2A7AE528E18C33F0E41EB2B6BA920AC3061EE`.
+
+## Repair round 2 — independent review findings
+
+- Added focused tests before implementation. Against the prior repair commit,
+  `python -m pytest tests/test_validation.py -q` reported eight failures:
+  five local or percent-encoded Markdown targets, optional host metadata drift,
+  case-mismatched `Skills`, and suppressed independent checks after invalid root
+  identity.
+- Markdown target validation percent-decodes first. It permits only explicit
+  remote schemes and `mailto`; `file:` URLs, unknown schemes, UNC paths, and
+  POSIX/Windows absolute paths now fail closed, including reference-style
+  targets.
+- Root identity retains every Agent Plugins v1 optional metadata field.
+  Codex/Claude manifests are compared for each optional field they provide:
+  `author`, `homepage`, `repository`, `license`, `keywords`, and `extensions`.
+- The canonical `skills` directory must be an exact-case, non-symlink regular
+  directory. This closes Windows case-folding acceptance of `Skills`.
+- Invalid root identity no longer suppresses host metadata/path checks,
+  marketplace source/shape checks, or standalone Skill structure/frontmatter
+  checks. Cross-manifest equality checks still run only when the root identity
+  is available.
+- The library validator and packaged standalone asset were updated together;
+  the root test wrapper and minimal fixture remain byte-identical copies of the
+  self-contained asset.
+
+## Repair round 2 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  44 passed.
+- `python -m pytest tests -v` — 56 passed.
+- `python -m compileall src` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `git diff --check` — passed.
+- SHA-256 of the packaged asset, root wrapper, and fixture wrapper — all
+  `5C5F47DF2355C66E4F472C277A6A0530471A9D3BF542F4E3379AA2968CA961A6`.
+
+## Safety and deferred scope
+
+The validator performs only local filesystem and UTF-8/JSON/Markdown text
+inspection. It has no PyYAML dependency and does not invoke generated content,
+network access, host CLIs, user scripts, or subprocesses. Installation and root
+plugin manifests, skills, and documentation remain untouched. As required, the
+repository root is intentionally not yet a valid package; Task 6 supplies its
+required manifests and Skill files.
+
+## Repair evidence — validator portability and strict parsing
+
+- Preserved the interrupted TDD additions in `tests/test_validation.py` and
+  `tests/test_bundle_apply.py`. Before the repair,
+  `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -q`
+  reported 12 failures: malformed or quoted frontmatter handling, external
+  symlink reads, optional root metadata, packaged-resource loading,
+  case-sensitive required paths, reference-style Markdown links, deterministic
+  walk ordering, and generated escaped descriptions.
+- The frontmatter parser now accepts only one-line unquoted plain scalars,
+  complete JSON double-quoted strings, or YAML single-quoted strings with
+  doubled apostrophes. It rejects malformed, multiline, block, and collection
+  values.
+- Validation now records escaping symlinks without reading their contents,
+  uses exact directory-entry names for required files on case-insensitive
+  filesystems, sorts `os.walk` directory and filename lists in place, and
+  checks inline plus reference-style Markdown targets.
+- The root manifest uses the closed Agent Plugins v1 field set with type checks
+  for `author`, `homepage`, `repository`, `license`, `keywords`, and
+  `extensions`. Optional `repository` and `license` are retained in root
+  identity comparison.
+- The standalone validator is now a package asset at
+  `src/agent_skillopt/assets/validate_bundle.py`, read with
+  `importlib.resources`. The identical self-contained file is used by the root
+  test wrapper, fixture, and generated bundles; it imports no project package.
+  Package data includes this asset for installed distributions.
+
+## Repair verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -q` —
+  32 passed.
+- `python -m pytest tests -v` — 44 passed.
+- `python -m compileall src` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `git diff --check` — passed.
+
+## Repair round 4 — Windows reparse-point layout hardening
+
+- Added three focused regressions before implementation. Against the previous
+  repair, `python -m pytest tests/test_validation.py -k "link_detector or
+  reparse" -v` selected three tests and failed all three because the shared
+  reparse detector did not exist.
+- The shared detector first recognizes normal symlinks, uses `Path.is_junction()`
+  when that API is available, then inspects
+  `lstat().st_file_attributes & 0x0400` without resolving the entry. This is
+  compatible with Python 3.10, where `Path.is_junction()` is absent.
+- Containment and every canonical layout check now use that detector:
+  `skills/`, immediate `skills/<name>/`, `SKILL.md`, and exact required
+  file/directory path components. Detected directory links/reparse points are
+  also removed from `os.walk`'s directory list before traversal can descend.
+- The regressions use a truthful `lstat` stat-object simulation for
+  `FILE_ATTRIBUTE_REPARSE_POINT`, plus an `is_junction()` simulation. They prove
+  that a simulated `skills/` or Skill child reparse point is rejected before
+  `iterdir()` or `SKILL.md` reads; no privileged real-junction creation is
+  required.
+- An additional containment regression proves that a detected reparse directory
+  is removed from `os.walk`'s mutable directory list before the next walk step.
+- The runtime validator, packaged standalone asset, root wrapper, and fixture
+  wrapper were updated in lockstep. The three standalone copies remain
+  byte-identical and import no project package.
+
+## Repair round 4 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  54 passed.
+- `python -m pytest tests -v` — 66 passed.
+- `python -m compileall -q src tests scripts` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- SHA-256 of packaged asset, root wrapper, and fixture wrapper — all
+  `8C565FD25DC44A04CE5C8F6E4EE2D1C11453D0DB448CF0EDB859A492CDD05EBD`.
+- `git diff --check` — passed.
+
+## Repair round 4 residual risk
+
+The suite intentionally avoids a privileged live NTFS junction fixture. Its
+fallback behavior is exercised through a stat-object with the native reparse
+attribute and an `is_junction()` path simulation; Windows filesystem API
+behavior remains subject to host/filesystem implementation differences.
+
+## Repair round 5 — fail-closed link probe errors
+
+- Added the new error-path regressions before implementation. The targeted
+  run selected eight reparse/probe tests: seven failed against the prior repair
+  (the new probe-state API was absent and all three `OSError` variants allowed
+  the walk guard to descend), while the missing-layout control passed.
+- Link/reparse probing now returns explicit `SAFE`, `LINK`, `MISSING`, or
+  `ERROR` results. A non-missing `OSError` from `is_symlink()`, an available
+  `is_junction()`, or `lstat()` records deterministic
+  `PATH_LINK_PROBE_INVALID` for that exact entry, without exposing operating
+  system error text.
+- Containment, canonical `skills/`, Skill-child, `SKILL.md`, and exact
+  required-file/directory checks all consume the same probe result. Link or
+  probe-error directories are removed from `os.walk` before descent, and no
+  subsequent `iterdir()` or Skill-content read occurs for the failed entry.
+- `FileNotFoundError` remains a distinct missing state, preserving ordinary
+  `REQUIRED_FILE_MISSING` and `SKILL_DIRECTORY_COUNT_INVALID` behavior instead
+  of claiming a metadata-probe failure.
+- The parametrized tests cover `is_symlink`, `is_junction`, and `lstat`
+  failures, guard traversal and reads, and assert full issue-tuple parity
+  between the library validator and self-contained root validator. Packaged
+  asset, root wrapper, and fixture wrapper are synchronized byte-for-byte.
+
+## Repair round 5 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  58 passed.
+- `python -m pytest tests -v` — 70 passed.
+- `python -m compileall -q src tests scripts` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- SHA-256 of packaged asset, root wrapper, and fixture wrapper — all
+  `6DC78D3181DE450252F575C847F236B1901C02C0093CA3933D3F79AC641B0064`.
+- `git diff --check` — passed.
+
+## Repair round 5 residual risk
+
+The suite simulates metadata probe errors rather than inducing filesystem
+permission faults or privileged live NTFS junctions. It directly verifies the
+same Python exception boundaries and exact validator output; behavior of a
+specific Windows filesystem driver can still vary outside this local contract.
+
+## Repair round 6 — reject linked bundle-root entries
+
+- Added seven focused regressions before implementation. Against the prior
+  repair, `python -m pytest tests/test_validation.py -k "symlinked_bundle_root
+  or unsafe_root_probe or missing_bundle_root" -v` selected seven tests: six
+  failed because validation entered `is_dir()`/`resolve()` and traversed the
+  supplied root, while the missing-root control passed.
+- `validate_bundle()` and the self-contained `validate()` now invoke the
+  shared no-follow link/reparse probe on the direct supplied root before any
+  `is_dir()` or `resolve()` call. A symlink, junction, or `lstat` reparse point
+  returns the deterministic `BUNDLE_ROOT_LINK_INVALID`; a non-missing probe
+  error returns `BUNDLE_ROOT_PROBE_INVALID`; a missing root retains the
+  existing `BUNDLE_ROOT_INVALID` result.
+- The actual temporary root-symlink regression passed on this Windows host.
+  Simulated junction, reparse, `is_symlink()` error, `is_junction()` error, and
+  `lstat()` error paths assert that no `is_dir()`, `resolve()`, `iterdir()`,
+  content read, or `os.walk()` traversal occurs. They also assert exact output
+  parity between the library validator and the self-contained root wrapper.
+- The packaged asset, root wrapper, and minimal-fixture wrapper were updated
+  in lockstep and remain byte-identical. The root check applies only to the
+  direct package entry; it deliberately does not inspect ancestor components.
+
+## Repair round 6 verification
+
+All commands used
+`C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe`.
+
+- Targeted root-entry TDD group — 7 passed (initially 6 failed, 1 passed).
+- `python -m pytest tests/test_validation.py tests/test_bundle_apply.py -v` —
+  65 passed.
+- `python -m pytest tests -v` — 77 passed.
+- `python -m compileall -q src tests scripts` — passed.
+- `python -m ruff check src tests scripts` — passed.
+- `python scripts/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- `python tests/validate_bundle.py tests/fixtures/minimal-skill` — `VALID`.
+- SHA-256 of packaged asset, root wrapper, and fixture wrapper — all
+  `FE542EC3E92BF8B1B88E35A10621C2662EF04EDD6E71FCC021572BB63E850C39`.
+- `git diff --check` — passed before commit.
+
+## Repair round 6 residual risk
+
+The real root-symlink path was exercised locally. Junction/reparse and
+metadata-error branches remain intentionally simulated where Windows privileges
+or filesystem behavior could make a live fixture unreliable; those simulations
+cover the exact no-follow Python probe boundaries and verify no later root
+access occurs.

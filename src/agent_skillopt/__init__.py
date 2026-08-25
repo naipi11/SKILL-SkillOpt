@@ -1,3 +1,3 @@
-"""Agent-SkillOpt: safe SkillOpt integration and evidence tooling."""
+"""Agent-SkillOpt: cross-host Skill authoring tools."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

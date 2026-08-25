@@ -1,0 +1,3 @@
+# minimal-skill
+
+Valid description.

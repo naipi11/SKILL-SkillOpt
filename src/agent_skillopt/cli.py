@@ -3,154 +3,197 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
-import os
-import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
-from datetime import datetime, timezone
 from pathlib import Path
 
-from agent_skillopt.config import load_config
-from agent_skillopt.doctor import run_doctor
-from agent_skillopt.errors import ConfigurationError, ExecutionGateError
-from agent_skillopt.init_project import available_presets, initialize_project
-from agent_skillopt.invocation import execute, render_invocation, require_execution_permission
-from agent_skillopt.report import build_report, write_report
+from agent_skillopt.bundle import apply_plan, build_plan, render_preview
+from agent_skillopt.errors import (
+    AgentSkillOptError,
+    ConfirmationError,
+    SpecError,
+    WriteConflictError,
+)
+from agent_skillopt.installation import build_install_plan, execute_install
+from agent_skillopt.models import SkillSpec
+from agent_skillopt.validation import validate_bundle
 
 
-def _placeholder_handler(_: argparse.Namespace) -> int:
-    """Temporarily acknowledge a registered command until it is implemented."""
+def _uses_utf8(encoding: object) -> bool:
+    """Return whether an output encoding is a UTF-8 codec alias."""
+    if not isinstance(encoding, str):
+        return True
+    try:
+        return codecs.lookup(encoding).name == "utf-8"
+    except (LookupError, TypeError):
+        return False
+
+
+def _configure_output_streams() -> None:
+    """Prefer UTF-8 for CLI output when the active text streams support it.
+
+    Windows consoles and redirected streams can inherit a legacy code page.  The
+    CLI deliberately contains Chinese help and diagnostics, so configure both
+    standard output and standard error before argparse can render either one.
+    Test runners and embedders may replace these streams with capture objects
+    that have no ``reconfigure`` method; those already accept text directly and
+    must be left alone.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if _uses_utf8(getattr(stream, "encoding", None)):
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, TypeError, ValueError):
+            continue
+
+
+def _unavailable_handler(arguments: argparse.Namespace) -> int:
+    """Report commands whose behavior belongs to a later implementation task."""
+    print(f"所选操作尚未可用，等待后续实现任务完成：{arguments.command}", file=sys.stderr)
+    return 2
+
+
+def _read_spec_argument(value: str) -> str:
+    """Read a preview specification from standard input or one UTF-8 JSON file."""
+    if value == "-":
+        return sys.stdin.read()
+    try:
+        return Path(value).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise SpecError("无法读取 UTF-8 JSON 规格文件。") from error
+
+
+def _preview_handler(arguments: argparse.Namespace) -> int:
+    """Render one write-free package preview from a strict JSON specification."""
+    try:
+        specification = SkillSpec.from_json(_read_spec_argument(arguments.spec))
+        preview = render_preview(build_plan(specification))
+    except AgentSkillOptError:
+        print("预览失败：规格无效。", file=sys.stderr)
+        return 2
+    print(json.dumps(preview, ensure_ascii=False, sort_keys=True))
     return 0
 
 
-def _init_handler(arguments: argparse.Namespace) -> int:
+def _apply_handler(arguments: argparse.Namespace) -> int:
+    """Create one package only after its recomputed preview token is confirmed."""
     try:
-        config_path = initialize_project(arguments.path, arguments.preset, arguments.force)
-    except (FileExistsError, ValueError) as error:
-        print(f"初始化失败：{error}", file=sys.stderr)
+        specification = SkillSpec.from_json(_read_spec_argument(arguments.spec))
+        plan = build_plan(specification)
+        if arguments.confirm != plan.confirmation_token:
+            raise ConfirmationError("confirmation token is missing or stale.")
+        apply_plan(plan, arguments.confirm)
+    except ConfirmationError:
+        print("应用失败：确认令牌无效。", file=sys.stderr)
         return 2
-    print(f"已创建配置：{config_path}")
+    except WriteConflictError:
+        print("应用失败：输出目录已存在。", file=sys.stderr)
+        return 2
+    except AgentSkillOptError:
+        print("应用失败：规格无效。", file=sys.stderr)
+        return 2
+    print(f"已创建 Skill 包：{plan.output_directory}")
     return 0
 
 
-def _doctor_handler(arguments: argparse.Namespace) -> int:
+def _validate_handler(arguments: argparse.Namespace) -> int:
+    """Report deterministic offline bundle validation results."""
+    issues = validate_bundle(arguments.path)
+    if issues:
+        for issue in issues:
+            print(f"{issue.code} {issue.path}: {issue.message}", file=sys.stderr)
+        return 1
+    print("VALID")
+    return 0
+
+
+def _subprocess_runner(command: tuple[str, ...]) -> int:
+    """Run one already-rendered argv tuple without invoking a shell."""
+    return subprocess.run(command, shell=False, check=False).returncode
+
+
+def _install_handler(arguments: argparse.Namespace) -> int:
+    """Render a host plan, or run it only through the exact confirmation gate."""
     try:
-        config = load_config(arguments.config)
-    except ConfigurationError as error:
-        print(f"配置错误：{error}", file=sys.stderr)
+        plan = build_install_plan(arguments.host, arguments.path, arguments.source)
+    except AgentSkillOptError:
+        print("安装计划失败：Skill 包或安装参数无效。", file=sys.stderr)
         return 2
 
-    diagnostics = run_doctor(config, os.environ)
-    if arguments.json:
-        print(json.dumps([item.to_dict() for item in diagnostics], ensure_ascii=False))
-    else:
-        for item in diagnostics:
-            print(f"{item.level.upper()} {item.code}: {item.message}")
-            if item.remediation:
-                print(f"  建议：{item.remediation}")
-    return 2 if any(item.level == "error" for item in diagnostics) else 0
-
-
-def _run_handler(arguments: argparse.Namespace) -> int:
-    try:
-        config = load_config(arguments.config)
-        invocation = render_invocation(config, arguments.config, datetime.now(timezone.utc))
-    except ConfigurationError as error:
-        print(f"配置或本地前置条件错误：{error}", file=sys.stderr)
-        return 2
-
-    if arguments.dry_run:
-        print("Dry-run command:")
-        print(shlex.join(invocation.command))
-        if not os.environ.get(config.provider.api_key_env):
-            print(f"警告：环境变量 {config.provider.api_key_env} 未设置；dry-run 不需要它。")
+    if plan.network_required:
+        print(
+            "警告：执行时会从指定 Git 源获取远程内容；远程内容可能变化，这是信任边界，"
+            "确认令牌不固定远程修订。",
+            file=sys.stderr,
+        )
+    print(
+        json.dumps(
+            {
+                "confirmation_token": plan.confirmation_token,
+                "network_required": plan.network_required,
+                "steps": [list(step) for step in plan.steps],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    if not arguments.execute:
         return 0
 
     try:
-        require_execution_permission(config, arguments.allow_network, os.environ)
-        return_code = execute(invocation, _subprocess_runner)
-    except ExecutionGateError as error:
-        print(f"运行门禁：{error}", file=sys.stderr)
-        return error.exit_code
-    return 0 if return_code == 0 else 4
-
-
-def _report_handler(arguments: argparse.Namespace) -> int:
-    manifest_path = arguments.run_dir / "manifest.json"
-    if not manifest_path.is_file():
-        print(f"报告输入错误：未找到 manifest.json：{manifest_path}", file=sys.stderr)
+        return execute_install(plan, arguments.confirm, _subprocess_runner)
+    except ConfirmationError:
+        print("安装失败：确认令牌无效。", file=sys.stderr)
         return 2
-
-    try:
-        report = build_report(arguments.run_dir)
-        output_directory = arguments.output_dir or arguments.run_dir
-        json_path, markdown_path = write_report(report, output_directory)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
-        print(f"报告输入错误：{error}", file=sys.stderr)
-        return 2
-
-    print(f"已生成 JSON 报告：{json_path}")
-    print(f"已生成 Markdown 报告：{markdown_path}")
-    return 0
+    except OSError:
+        print("安装执行失败：无法启动宿主命令。", file=sys.stderr)
+        return 1
 
 
-def _subprocess_runner(
-    command: tuple[str, ...], working_directory: Path, child_environment: dict[str, str]
-) -> int:
-    result = subprocess.run(
-        command,
-        cwd=working_directory,
-        env=child_environment,
-        check=False,
-    )
-    return result.returncode
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Build the public command parser."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the 0.2.0 command parser."""
     parser = argparse.ArgumentParser(
         prog="agent-skillopt",
-        description="Agent-SkillOpt：安全集成 Microsoft SkillOpt 的工具包。",
+        description="Agent-SkillOpt：跨宿主 Skill 创作工具。",
     )
     subcommands = parser.add_subparsers(dest="command", title="commands")
 
-    init = subcommands.add_parser("init", help="创建本地项目配置。")
-    init.add_argument("--path", type=Path, default=Path("."), help="目标项目目录。")
-    init.add_argument(
-        "--preset",
-        choices=available_presets(),
-        default="searchqa-deepseek",
-        help="要写入的起始配置。",
+    preview = subcommands.add_parser("preview", help="预览将要创建的四宿主 Skill 包。")
+    preview.add_argument("--spec", required=True, help="JSON 规格文件路径，或 - 表示标准输入。")
+    preview.set_defaults(handler=_preview_handler)
+
+    apply = subcommands.add_parser("apply", help="在确认后创建四宿主 Skill 包。")
+    apply.add_argument("--spec", required=True)
+    apply.add_argument("--confirm", required=True)
+    apply.set_defaults(handler=_apply_handler)
+
+    validate = subcommands.add_parser("validate", help="离线验证一个四宿主 Skill 包。")
+    validate.add_argument("--path", type=Path, required=True)
+    validate.set_defaults(handler=_validate_handler)
+
+    install = subcommands.add_parser("install", help="渲染或显式执行宿主安装命令。")
+    install.add_argument(
+        "--host", choices=("codex", "claude", "hermes", "openclaw"), required=True
     )
-    init.add_argument("--force", action="store_true", help="允许覆盖已有 agent-skillopt.yaml。")
-    init.set_defaults(handler=_init_handler)
-
-    doctor = subcommands.add_parser("doctor", help="诊断本地配置和上游检出。")
-    doctor.add_argument("--config", type=Path, required=True, help="项目 YAML 配置路径。")
-    doctor.add_argument("--json", action="store_true", help="输出稳定的 JSON 诊断数组。")
-    doctor.set_defaults(handler=_doctor_handler)
-
-    run = subcommands.add_parser("run", help="渲染或执行经授权的上游训练。")
-    run.add_argument("--config", type=Path, required=True, help="项目 YAML 配置路径。")
-    mode = run.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="只渲染命令，不启动子进程。")
-    mode.add_argument("--allow-network", action="store_true", help="确认允许真实网络运行。")
-    run.set_defaults(handler=_run_handler)
-
-    report = subcommands.add_parser("report", help="生成证据优先的实验报告。")
-    report.add_argument(
-        "--run-dir", type=Path, required=True, help="包含 manifest.json 的运行目录。"
-    )
-    report.add_argument("--output-dir", type=Path, help="报告输出目录；默认写入运行目录。")
-    report.set_defaults(handler=_report_handler)
+    install.add_argument("--path", type=Path, required=True)
+    install.add_argument("--execute", action="store_true")
+    install.add_argument("--confirm")
+    install.add_argument("--source", help="Hermes 明确的 <owner>/<repository> Git 安装源。")
+    install.set_defaults(handler=_install_handler)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return its process status without exiting the caller."""
-    parser = build_parser()
+    _configure_output_streams()
+    parser = _build_parser()
     try:
         arguments = parser.parse_args(argv)
     except SystemExit as error:
