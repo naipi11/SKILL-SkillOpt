@@ -72,10 +72,7 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
 
     for marketplace in (claude_marketplace, agents_marketplace):
         assert marketplace["name"] == "agent-skillopt"
-        matching_entries = [
-            entry for entry in marketplace["plugins"] if entry["name"] == "agent-skillopt"
-        ]
-        assert matching_entries == [{"name": "agent-skillopt", "source": "./"}]
+        assert marketplace["plugins"] == [{"name": "agent-skillopt", "source": "./"}]
     assert claude_plugin["name"] == codex_plugin["name"] == "agent-skillopt"
     assert codex_plugin["skills"] == ["./skills/"]
 
