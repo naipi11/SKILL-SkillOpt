@@ -38,10 +38,13 @@ codex plugin marketplace add naipi11/Agent-SkillOpt --ref main
 codex plugin add agent-skillopt@agent-skillopt
 ```
 
-`main` 是可变分支，后续提交可能改变同一 ref 的内容。当前不声称存在可用 release；当有 release
-时，请使用其不可变 tag 或完整 commit SHA 代替 `main`（例如在 Codex 命令的 `--ref` 中），再执行
-显式的刷新或升级操作。安装后的脚手架实际执行时需要 Python 3.10+；仅完成 marketplace 获取并不
-等同于已经运行脚手架。
+`main` 是可变分支，后续提交可能改变同一 ref 的内容。Codex 当前本地 CLI 的 `--ref` 可指定 ref；
+上面的 Claude Code GitHub 简写则使用默认分支（当前为 `main`）。不要把两者当作相同的 ref 语义。
+Claude 的远程 marketplace source 使用 branch/tag ref，不承诺能以 commit SHA 固定安装。release tag
+也只是 Git ref，不天然不可变：只能在受保护且受信任时使用，并应在 release notes 中记录、复核其
+解析出的 40 位 commit SHA，以审计并确认精确内容身份。刷新或更新须由用户显式发起，且会访问网络；
+本项目没有测试实际的远程刷新、更新或安装。安装后的脚手架实际执行时需要 Python 3.10+；仅完成
+marketplace 获取并不等同于已经运行脚手架。
 
 ## 本地生成 Skill 的安全工作流
 

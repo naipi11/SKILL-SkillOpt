@@ -43,6 +43,9 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     claude_marketplace = json.loads(
         (project_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
     )
+    agents_marketplace = json.loads(
+        (project_root / ".agents" / "plugins" / "marketplace.json").read_text(encoding="utf-8")
+    )
     claude_plugin = json.loads(
         (project_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
     )
@@ -61,20 +64,39 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     assert "无需本地 clone" in readme
     assert "Python 3.10+" in readme
     assert "`main` 是可变分支" in readme
+    assert "release tag" in readme
+    assert "天然不可变" in readme
+    assert "40 位 commit SHA" in readme
+    assert "相同的 ref 语义" in readme
+    assert "不可变 tag" not in readme
 
-    assert claude_marketplace["name"] == "agent-skillopt"
-    assert claude_marketplace["plugins"] == [{"name": "agent-skillopt", "source": "./"}]
+    for marketplace in (claude_marketplace, agents_marketplace):
+        assert marketplace["name"] == "agent-skillopt"
+        matching_entries = [
+            entry for entry in marketplace["plugins"] if entry["name"] == "agent-skillopt"
+        ]
+        assert matching_entries == [{"name": "agent-skillopt", "source": "./"}]
     assert claude_plugin["name"] == codex_plugin["name"] == "agent-skillopt"
     assert codex_plugin["skills"] == ["./skills/"]
 
     assert "清单/CLI 契约" in compatibility
     assert "未实际远程安装" in compatibility
-    assert "刷新或升级" in compatibility
+    assert "刷新或更新" in compatibility
     assert "可变分支" in compatibility
+    assert "release tag" in compatibility
+    assert "天然不可变" in compatibility
+    assert "40 位 commit SHA" in compatibility
+    assert "相同的 ref 语义" in compatibility
+    assert "不可变 tag" not in compatibility
     assert "CLI 命令契约" in security
     assert "实际远程安装" in security
-    assert "刷新或升级" in security
+    assert "刷新或更新" in security
     assert "可变分支" in security
+    assert "release tag" in security
+    assert "天然不可变" in security
+    assert "40 位 commit SHA" in security
+    assert "相同的 ref 语义" in security
+    assert "不可变 tag" not in security
 
 
 def test_docs_record_safe_host_boundaries_and_openclaw_status(project_root: Path):

@@ -24,8 +24,12 @@ token 不包含凭据，也不 pin Hermes 远端 commit。最终本地快照后�
 - 远程 marketplace 获取会访问网络，且 Claude Code 的 `/plugin marketplace add`、`/plugin install`、
   `/reload-plugins` 与 Codex 的 `codex plugin marketplace add`、`codex plugin add` 都会改变用户级
   marketplace、缓存或插件状态。当前证据仅覆盖离线清单与 CLI 命令契约，**不**覆盖实际远程安装。
-- `main` 是可变分支；远端内容可在同一 branch ref 下漂移。刷新或升级不是自动行为，必须由操作者
-  明确请求并重新审查来源。将来有 release 时，应使用不可变 tag 或完整 commit SHA，而不是 `main`。
+- `main` 是可变分支；远端内容可在同一 branch ref 下漂移。Codex 当前本地 CLI 支持 `--ref`，但
+  Claude 的远程 GitHub 简写使用默认分支（当前为 `main`），不能把两端表述为相同的 ref 语义；Claude
+  远程 marketplace source 只支持 branch/tag ref，不承诺能以 commit SHA 固定安装。release tag 同样
+  是 Git ref，不天然不可变，只有受保护且受信任时才可使用；应在 release notes 中记录并复核其解析
+  的 40 位 commit SHA，以审计和验证精确内容身份。刷新或更新不是自动行为，必须由用户显式发起、
+  重新审查来源并访问网络；本项目没有测试实际远程刷新、更新或安装。
 - 远程仓库 bootstrap 与本地生成 bundle 的安装计划不同：`scaffold_bundle.py install` 仍只为已经
   创建并离线验证的本地 bundle 渲染计划，不会安装此仓库的远程 marketplace source。
 - Codex 与 Claude Code 的本地 bundle marketplace/add/install 同样改变用户级配置或缓存。
