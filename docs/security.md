@@ -21,7 +21,19 @@ token 不包含凭据，也不 pin Hermes 远端 commit。最终本地快照后�
 
 ## 明确的宿主风险
 
-- Codex 与 Claude Code 的 marketplace/add/install 改变用户级配置或缓存。
+- 远程 marketplace 获取会访问网络，且 Claude Code 的 `/plugin marketplace add`、`/plugin install`、
+  `/reload-plugins` 与 Codex 的 `codex plugin marketplace add`、`codex plugin add` 都会改变用户级
+  marketplace、缓存或插件状态。当前证据仅覆盖离线清单与 CLI 命令契约，**不**覆盖实际远程安装。
+- `main` 是可变分支；远端内容可在同一 branch ref 下漂移。Codex 当前本地 CLI 支持 `--ref`，但
+  Claude 的远程 GitHub 简写使用默认分支（当前为 `main`），不能把两端表述为相同的 ref 语义；Claude
+  远程 marketplace source 只支持 branch/tag ref，不承诺能以 commit SHA 固定安装。release tag 同样
+  是 Git ref，不天然不可变，只有受保护且受信任时才可使用；应在 release notes 中记录并复核其解析
+  的 40 位 commit SHA，以审计和验证精确内容身份。依据 Claude Code 官方插件契约，Git marketplace
+  可能会按其设置在后台刷新；初始配置后，即使没有新的明确用户命令，也可能发生远程获取。显式安装或
+  更新同样会访问网络并改变宿主状态；本项目没有运行真实的远程刷新、更新或安装。
+- 远程仓库 bootstrap 与本地生成 bundle 的安装计划不同：`scaffold_bundle.py install` 仍只为已经
+  创建并离线验证的本地 bundle 渲染计划，不会安装此仓库的远程 marketplace source。
+- Codex 与 Claude Code 的本地 bundle marketplace/add/install 同样改变用户级配置或缓存。
 - Hermes 的 Git install 会获取可变远程内容，`enable` 会改变外部宿主状态；source token 绑定
   不是内容审计。
 - OpenClaw install、inspect、gateway restart 会触及宿主状态或重建网关运行时，且未本机安装验证。

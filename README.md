@@ -17,9 +17,40 @@ Agent-SkillOpt 是中文优先的离线 Skill 创作器：一个可移植的 [Ag
 Code marketplace、Hermes Agent 便携包、OpenClaw 兼容包发现。创建和验证不会发起网络、读取
 secret、安装依赖或执行生成 Skill 的脚本。
 
-## 安全工作流
+## 远程 marketplace 快速安装（无需本地 clone）
 
-唯一流程是：自然语言 brief → stdin `preview` → 检查返回的目录、文件、token →
+若只需使用本项目随仓库分发的 `agent-skillopt` Skill，可直接让宿主从 GitHub marketplace
+获取；不需要本地 clone。本段命令会访问网络，并改变宿主的用户级 marketplace、缓存或已安装
+插件状态，执行前请审查来源并自行决定是否继续。
+
+**Claude Code 对话内 slash commands：**
+
+```text
+/plugin marketplace add naipi11/Agent-SkillOpt
+/plugin install agent-skillopt@agent-skillopt
+/reload-plugins
+```
+
+**Codex 终端 CLI：**
+
+```powershell
+codex plugin marketplace add naipi11/Agent-SkillOpt --ref main
+codex plugin add agent-skillopt@agent-skillopt
+```
+
+`main` 是可变分支，后续提交可能改变同一 ref 的内容。Codex 当前本地 CLI 的 `--ref` 可指定 ref；
+上面的 Claude Code GitHub 简写则使用默认分支（当前为 `main`）。不要把两者当作相同的 ref 语义。
+Claude 的远程 marketplace source 使用 branch/tag ref，不承诺能以 commit SHA 固定安装。release tag
+也只是 Git ref，不天然不可变：只能在受保护且受信任时使用，并应在 release notes 中记录、复核其
+解析出的 40 位 commit SHA，以审计并确认精确内容身份。依据 Claude Code 官方插件契约，Git
+marketplace 可能会按其设置在后台刷新；初始配置后，即使没有新的明确用户命令，也可能发生远程获取。
+显式安装或更新同样会访问网络并改变宿主状态；本项目没有运行真实的远程刷新、更新或安装。安装后的
+脚手架实际执行时需要 Python 3.10+；仅完成
+marketplace 获取并不等同于已经运行脚手架。
+
+## 本地生成 Skill 的安全工作流
+
+创建新的本地生成 Skill 包时，流程是：自然语言 brief → stdin `preview` → 检查返回的目录、文件、token →
 **一次明确确认** → 精确 `apply` → 离线 `validate` → 为所选宿主渲染 `install`。实际宿主执行
 是单独的外部状态变更，必须再次明确请求并提供与新安装计划匹配的 token。
 
