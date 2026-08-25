@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
 import subprocess
 import sys
@@ -19,6 +20,38 @@ from agent_skillopt.errors import (
 from agent_skillopt.installation import build_install_plan, execute_install
 from agent_skillopt.models import SkillSpec
 from agent_skillopt.validation import validate_bundle
+
+
+def _uses_utf8(encoding: object) -> bool:
+    """Return whether an output encoding is a UTF-8 codec alias."""
+    if not isinstance(encoding, str):
+        return True
+    try:
+        return codecs.lookup(encoding).name == "utf-8"
+    except (LookupError, TypeError):
+        return False
+
+
+def _configure_output_streams() -> None:
+    """Prefer UTF-8 for CLI output when the active text streams support it.
+
+    Windows consoles and redirected streams can inherit a legacy code page.  The
+    CLI deliberately contains Chinese help and diagnostics, so configure both
+    standard output and standard error before argparse can render either one.
+    Test runners and embedders may replace these streams with capture objects
+    that have no ``reconfigure`` method; those already accept text directly and
+    must be left alone.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if _uses_utf8(getattr(stream, "encoding", None)):
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, TypeError, ValueError):
+            continue
 
 
 def _unavailable_handler(arguments: argparse.Namespace) -> int:
@@ -159,6 +192,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return its process status without exiting the caller."""
+    _configure_output_streams()
     parser = _build_parser()
     try:
         arguments = parser.parse_args(argv)

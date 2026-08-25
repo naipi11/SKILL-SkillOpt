@@ -84,6 +84,7 @@ def test_documented_preview_contract_matches_the_wrapper_from_an_arbitrary_cwd(
         cwd=tmp_path,
         input=json.dumps(specification),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=True,
     )
@@ -141,6 +142,7 @@ def test_documented_hermes_render_requires_source_and_does_not_execute_a_host(
         ],
         cwd=tmp_path,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=True,
         env=environment,

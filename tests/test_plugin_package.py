@@ -1,6 +1,7 @@
 """Contract tests for the repository's installable four-host package."""
 
 import json
+import os
 import subprocess
 import sys
 
@@ -39,12 +40,54 @@ def test_scaffolder_wrapper_forwards_help_without_writing(project_root, tmp_path
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
     assert result.returncode == 0
     assert "preview" in result.stdout
     assert list(tmp_path.iterdir()) == []
+
+
+def test_cli_outputs_utf8_when_pythonioencoding_is_a_legacy_code_page(project_root, tmp_path):
+    wrapper = project_root / "skills" / "agent-skillopt" / "scripts" / "scaffold_bundle.py"
+    environment = {
+        **os.environ,
+        "PYTHONIOENCODING": "cp1252:strict",
+        "PYTHONPATH": str(project_root / "src"),
+    }
+
+    for command in (
+        [sys.executable, str(wrapper), "--help"],
+        [sys.executable, "-m", "agent_skillopt", "--help"],
+    ):
+        result = subprocess.run(
+            command,
+            cwd=tmp_path,
+            capture_output=True,
+            text=False,
+            env=environment,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert "跨宿主 Skill 创作工具" in result.stdout.decode("utf-8")
+
+    for command in (
+        [sys.executable, str(wrapper), "preview", "--spec", "missing.json"],
+        [sys.executable, "-m", "agent_skillopt", "preview", "--spec", "missing.json"],
+    ):
+        error_result = subprocess.run(
+            command,
+            cwd=tmp_path,
+            capture_output=True,
+            text=False,
+            env=environment,
+            check=False,
+        )
+
+        assert error_result.returncode == 2
+        assert "预览失败：规格无效。" in error_result.stderr.decode("utf-8")
 
 
 def test_scaffolder_wrapper_overrides_a_preloaded_external_package(project_root, tmp_path):
@@ -72,6 +115,7 @@ def test_scaffolder_wrapper_overrides_a_preloaded_external_package(project_root,
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
@@ -102,6 +146,7 @@ def test_scaffolder_wrapper_discards_preloaded_modules_without_an_origin(project
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
@@ -140,6 +185,7 @@ def test_scaffolder_wrapper_discards_a_cached_module_from_repo_outside_src(proje
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
@@ -180,6 +226,7 @@ def test_scaffolder_wrapper_discards_source_looking_package_with_poisoned_search
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
