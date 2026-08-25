@@ -102,3 +102,33 @@ Residual scope is unchanged: this proves source validation, strict Claude
 manifest validation, read-only CLI availability, and render-only plan grammar.
 It does not prove actual marketplace addition, installation, remote fetching,
 enablement, discovery, runtime execution, restart, or OpenClaw behavior.
+
+## Post-Windows output-encoding repair
+
+The initial GitHub Actions Windows matrix correctly exposed a release-blocking
+CLI defect: a redirected CP1252 stream could not encode the Chinese help text
+from `argparse`, so wrapper `--help` tests failed. Commit
+`b04bd237ddda6a8454af18930914bc002e07ca9b` configures only reconfigurable
+standard streams to UTF-8 before parsing arguments, while leaving capture and
+embedded streams that cannot be reconfigured untouched. It is a runtime fix,
+not a CI-only environment override.
+
+Fresh local verification of that commit used the source venv with `src` first
+on `PYTHONPATH`:
+
+| Command or check | Result |
+| --- | --- |
+| `python -m pytest tests -q` | Exit 0; **181 passed** in 6.86 s. |
+| `python -m compileall src skills/agent-skillopt/scripts` | Exit 0. |
+| `python scripts/validate_bundle.py .` | Exit 0; `VALID`. |
+| `python -m ruff check src tests skills/agent-skillopt/scripts` | Exit 0; `All checks passed!`. |
+| `git diff --check 527f557..HEAD` and `git show --check` | Exit 0; no whitespace errors. |
+| Git-Bash `bash -n scripts/validate.sh` and `scripts/validate.sh` with the source venv first on `PATH` | Exit 0; 181 passed, `VALID`, and `All checks passed!`. |
+
+Under system Python 3.12 with `PYTHONIOENCODING=cp1252:strict`, the shipped
+wrapper's `--help` and `python -m agent_skillopt`'s Chinese diagnostic both
+exited successfully and their captured bytes decoded as UTF-8. The regression
+test covers both entry paths and both stdout help and stderr error output.
+An independent source review found no Python 3.10+, Windows, stream-capture,
+or CLI-contract regression. Remote CI remains the merge gate; no host action
+was performed for this repair.
