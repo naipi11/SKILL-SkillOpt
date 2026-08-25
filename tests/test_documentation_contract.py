@@ -11,12 +11,45 @@ from agent_skillopt.models import SkillSpec
 
 
 def test_readme_lists_each_host_and_the_safe_creation_boundary(project_root: Path):
-    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    english_readme = (project_root / "README.md").read_text(encoding="utf-8")
+    chinese_readme = (project_root / "README.zh-CN.md").read_text(encoding="utf-8")
 
-    for host in ("Codex", "Claude Code", "Hermes", "OpenClaw"):
-        assert host in readme
+    for readme in (english_readme, chinese_readme):
+        for host in ("Codex", "Claude Code", "Hermes", "OpenClaw"):
+            assert host in readme
+        for document in (
+            "docs/compatibility.md",
+            "docs/security.md",
+            "docs/migration-v0.2.md",
+        ):
+            assert document in readme
+
+    for boundary in ("preview", "confirmation", "validate", "install", "offline", "PLAN ONLY"):
+        assert boundary in english_readme
     for boundary in ("preview", "确认", "validate", "install", "离线", "PLAN ONLY"):
-        assert boundary in readme
+        assert boundary in chinese_readme
+
+    for heading in (
+        "Install the current Agent-SkillOpt plugin",
+        "Failure checks and recovery",
+        "Safely create a local Skill package",
+        "Render an installation plan only",
+        "Local validation",
+    ):
+        assert heading in english_readme
+    for heading in (
+        "安装当前 Agent-SkillOpt 插件",
+        "失败时的检查与恢复",
+        "本地生成 Skill 的安全工作流",
+        "仅渲染安装计划",
+        "本地验证",
+    ):
+        assert heading in chinese_readme
+
+    assert '<a href="README.zh-CN.md">简体中文</a>' in english_readme
+    assert '<a href="README.md">English</a>' in chinese_readme
+    assert "Install the current Agent-SkillOpt plugin" in english_readme
+    assert "安装当前 Agent-SkillOpt 插件" in chinese_readme
 
 
 def test_readme_does_not_reintroduce_retired_provider_or_credential_claims(project_root: Path):
@@ -24,6 +57,7 @@ def test_readme_does_not_reintroduce_retired_provider_or_credential_claims(proje
         (project_root / path).read_text(encoding="utf-8")
         for path in (
             "README.md",
+            "README.zh-CN.md",
             "CONTRIBUTING.md",
             "docs/compatibility.md",
             "docs/security.md",
@@ -38,7 +72,8 @@ def test_readme_does_not_reintroduce_retired_provider_or_credential_claims(proje
 
 def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(project_root: Path):
     published_sha = "9a3c9e1765a5ff0561af5221906879670f5c4536"
-    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    english_readme = (project_root / "README.md").read_text(encoding="utf-8")
+    chinese_readme = (project_root / "README.zh-CN.md").read_text(encoding="utf-8")
     compatibility = (project_root / "docs" / "compatibility.md").read_text(encoding="utf-8")
     security = (project_root / "docs" / "security.md").read_text(encoding="utf-8")
     claude_marketplace = json.loads(
@@ -64,19 +99,20 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
         "hermes plugins enable agent-skillopt",
         "openclaw plugins install <bundle-root>",
     ):
-        assert command in readme
-    assert "当前 Agent-SkillOpt 插件" in readme
-    assert "已发布 `v0.2.1` 的本机实际安装快照" in readme
-    assert "当前文档只验证了 CLI/清单契约" not in readme
-    assert "Python 3.10+" in readme
-    assert "`main` 是可变分支" in readme
-    assert "release tag" in readme
-    assert "天然不可变" in readme
-    assert "40 位 commit SHA" in readme
-    assert "相同的 ref 语义" in readme
-    assert "不可变 tag" not in readme
+        assert command in english_readme
+        assert command in chinese_readme
+    assert "Install the current Agent-SkillOpt plugin" in english_readme
+    assert "installation snapshot for released `v0.2.1`" in english_readme
+    assert "当前文档只验证了 CLI/清单契约" not in english_readme
+    assert "Python 3.10+" in english_readme
+    assert "`main` is mutable" in english_readme
+    assert "release tag" in english_readme
+    assert "inherently immutable" in english_readme
+    assert "40-character commit SHA" in english_readme
+    assert "same ref semantics" in " ".join(english_readme.split())
+    assert "immutable tag" not in english_readme
 
-    for text in (readme, compatibility, security):
+    for text in (chinese_readme, compatibility, security):
         normalized = "".join(text.split())
         assert "依据ClaudeCode官方插件契约，Gitmarketplace可能会按其设置在后台刷新" in normalized
         assert "初始配置后，即使没有新的明确用户命令，也可能发生远程获取" in normalized
@@ -85,6 +121,14 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
         assert "刷新或更新须由用户显式发起" not in text
         assert "刷新或更新必须由用户另行明确执行" not in text
         assert "刷新或更新不是自动行为，必须由用户显式发起" not in text
+
+    normalized_english = "".join(english_readme.split())
+    assert "Gitmarketplacescanrefreshinthebackgroundaccordingtotheirsettings" in normalized_english
+    assert (
+        "remotefetchingcanoccurafterinitialconfiguration"
+        "evenwithoutanewexplicitcommand"
+    ) in normalized_english
+    assert "Explicitinstallsandupdatesalsoaccessthenetworkandalterhoststate" in normalized_english
 
     for marketplace in (claude_marketplace, agents_marketplace):
         assert marketplace["name"] == "agent-skillopt"
@@ -130,7 +174,8 @@ def test_docs_record_safe_host_boundaries_and_openclaw_status(project_root: Path
 def test_docs_distinguish_project_installation_from_generated_bundle_installation(
     project_root: Path,
 ):
-    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    english_readme = (project_root / "README.md").read_text(encoding="utf-8")
+    chinese_readme = (project_root / "README.zh-CN.md").read_text(encoding="utf-8")
     skill = (project_root / "skills" / "agent-skillopt" / "SKILL.md").read_text(
         encoding="utf-8"
     )
@@ -138,18 +183,23 @@ def test_docs_distinguish_project_installation_from_generated_bundle_installatio
         project_root / "skills" / "agent-skillopt" / "references" / "host-installation.md"
     ).read_text(encoding="utf-8")
 
-    assert "安装当前 Agent-SkillOpt 插件" in readme
-    assert "而非下文示例中由它创建的" in readme
-    assert "`release-notes` bundle" in readme
-    assert "--source-ref <40-char-sha>" in readme
+    assert "Install the current Agent-SkillOpt plugin" in english_readme
+    assert "not the" in english_readme
+    assert "bundle created in the example below" in english_readme
+    assert "安装当前 Agent-SkillOpt 插件" in chinese_readme
+    assert "而非下文示例中由它创建的" in chinese_readme
+    for readme in (english_readme, chinese_readme):
+        assert "`release-notes` bundle" in readme
+        assert "--source-ref <40-char-sha>" in readme
     assert "--source-ref <40-char-sha>" in skill
     assert "--source-ref" in host_installation
     assert "plugins show <name>" in host_installation
-    assert (
-        "`hermes plugins install <owner>/<repository> --ref <40-char-sha> --no-enable`"
-        "<br>`hermes plugins enable release-notes`"
-    ) in readme
-    assert "hermes plugins show release-notes" not in readme
+    for readme in (english_readme, chinese_readme):
+        assert (
+            "`hermes plugins install <owner>/<repository> --ref <40-char-sha> --no-enable`"
+            "<br>`hermes plugins enable release-notes`"
+        ) in readme
+        assert "hermes plugins show release-notes" not in readme
     assert (
         "`hermes plugins install <owner>/<repository> --ref <40-char-sha> --no-enable`，"
         "再 `hermes plugins enable <name>`"
@@ -168,8 +218,10 @@ def test_docs_record_non_atomic_recovery_and_manifest_version_parity(project_roo
     package_init = (project_root / "src" / "agent_skillopt" / "__init__.py").read_text(
         encoding="utf-8"
     )
-    documents = [
-        (project_root / "README.md").read_text(encoding="utf-8"),
+    english_readme = (project_root / "README.md").read_text(encoding="utf-8")
+    chinese_readme = (project_root / "README.zh-CN.md").read_text(encoding="utf-8")
+    chinese_documents = [
+        chinese_readme,
         (project_root / "docs" / "compatibility.md").read_text(encoding="utf-8"),
         (project_root / "docs" / "security.md").read_text(encoding="utf-8"),
     ]
@@ -182,13 +234,16 @@ def test_docs_record_non_atomic_recovery_and_manifest_version_parity(project_roo
     )
     assert 'version = "0.2.1"' in pyproject
     assert '__version__ = "0.2.1"' in package_init
-    for text in documents:
+    assert "not atomic" in english_readme
+    assert "40-character commit SHA" in english_readme
+    assert "OpenClaw was not verified locally" in " ".join(english_readme.split())
+    for text in chinese_documents:
         assert "原子" in text
         assert "40 位 commit SHA" in text
         assert "OpenClaw" in text
-    assert "OpenClaw 未在本机验证" in documents[0]
-    assert "OpenClaw 未本机安装" in documents[1]
-    assert "OpenClaw 未本机安装验证" in documents[2]
+    assert "OpenClaw 未在本机验证" in chinese_documents[0]
+    assert "OpenClaw 未本机安装" in chinese_documents[1]
+    assert "OpenClaw 未本机安装验证" in chinese_documents[2]
 
 
 def test_migration_retains_a_clear_legacy_pin_and_retired_docs_are_absent(project_root: Path):
@@ -204,7 +259,8 @@ def test_migration_retains_a_clear_legacy_pin_and_retired_docs_are_absent(projec
 def test_documented_preview_contract_matches_the_wrapper_from_an_arbitrary_cwd(
     project_root: Path, tmp_path: Path
 ):
-    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    english_readme = (project_root / "README.md").read_text(encoding="utf-8")
+    chinese_readme = (project_root / "README.zh-CN.md").read_text(encoding="utf-8")
     wrapper = project_root / "skills" / "agent-skillopt" / "scripts" / "scaffold_bundle.py"
     output_directory = tmp_path / "release-notes"
     specification = {
@@ -240,8 +296,10 @@ def test_documented_preview_contract_matches_the_wrapper_from_an_arbitrary_cwd(
         "skills/release-notes/SKILL.md",
     }
     for key in ("`output_directory`", "`files`", "`confirmation_token`"):
-        assert key in readme
-    assert "没有顶层 `resources` 字段" in readme
+        assert key in english_readme
+        assert key in chinese_readme
+    assert "no top-level `resources` field" in english_readme
+    assert "没有顶层 `resources` 字段" in chinese_readme
 
 
 def test_documented_hermes_render_requires_source_and_does_not_execute_a_host(
