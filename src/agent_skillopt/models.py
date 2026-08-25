@@ -116,6 +116,7 @@ class InstallPlan:
     bundle_root_identity: tuple[int, int]
     bundle_name: str
     source: str | None
+    source_ref: str | None = None
 
 
 def _required_text(value: object, field: str) -> str:

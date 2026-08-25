@@ -20,8 +20,12 @@ from agent_skillopt.validation import assert_valid_bundle
 _SUPPORTED_HOSTS = frozenset(("codex", "claude", "hermes", "openclaw"))
 _WINDOWS_CMD_UNSAFE_CHARACTERS = frozenset("&|<>()^%!\"'")
 _HERMES_GIT_SOURCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+_HERMES_COMMIT_SHA = re.compile(r"[0-9a-fA-F]{40}")
 _HERMES_SOURCE_ERROR = (
     "--source is required and must be an explicit owner/repository Git source for Hermes."
+)
+_HERMES_SOURCE_REF_ERROR = (
+    "--source-ref must be an immutable 40-character Git commit SHA for Hermes."
 )
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
@@ -56,17 +60,19 @@ class _BundleSnapshot:
     root_identity: tuple[int, int]
 
 
-def build_install_plan(host: str, bundle_root: Path, source: str | None) -> InstallPlan:
+def build_install_plan(
+    host: str, bundle_root: Path, source: str | None, source_ref: str | None = None
+) -> InstallPlan:
     """Render one validated, argv-safe host installation plan without executing it."""
     if host not in _SUPPORTED_HOSTS:
         raise SpecError("unsupported host")
 
     selected_host = cast(HostName, host)
-    selected_source = _validated_source(selected_host, source)
+    selected_source, selected_source_ref = _validated_source(selected_host, source, source_ref)
     direct_root = Path(bundle_root)
     _assert_safe_command_argument(str(direct_root), "bundle root")
     snapshot = _validated_bundle_snapshot(direct_root)
-    return _render_install_plan(selected_host, snapshot, selected_source)
+    return _render_install_plan(selected_host, snapshot, selected_source, selected_source_ref)
 
 
 def execute_install(
@@ -77,7 +83,7 @@ def execute_install(
         raise ConfirmationError("confirmation token is missing or stale.")
 
     try:
-        expected = build_install_plan(plan.host, plan.bundle_root, plan.source)
+        expected = build_install_plan(plan.host, plan.bundle_root, plan.source, plan.source_ref)
     except (AgentSkillOptError, OSError, TypeError, ValueError) as error:
         raise ConfirmationError("installation plan is stale.") from error
     if plan != expected:
@@ -91,7 +97,7 @@ def execute_install(
 
 
 def _render_install_plan(
-    host: HostName, snapshot: _BundleSnapshot, source: str | None
+    host: HostName, snapshot: _BundleSnapshot, source: str | None, source_ref: str | None
 ) -> InstallPlan:
     """Construct the exact host tuple sequence from one trusted local snapshot."""
     root_argument = _assert_safe_command_argument(str(snapshot.root), "bundle root")
@@ -99,14 +105,19 @@ def _render_install_plan(
     if host == "hermes":
         if source is None:
             raise SpecError(_HERMES_SOURCE_ERROR)
+        install_step = ("hermes", "plugins", "install", source)
+        if source_ref is not None:
+            install_step += ("--ref", source_ref)
         steps = (
-            ("hermes", "plugins", "install", source, "--no-enable"),
+            install_step + ("--no-enable",),
             ("hermes", "plugins", "enable", name),
         )
         network_required = True
     else:
-        if source is not None:
-            raise SpecError("--source is only supported for Hermes installations.")
+        if source is not None or source_ref is not None:
+            raise SpecError(
+                "--source and --source-ref are only supported for Hermes installations."
+            )
         steps = _local_host_steps(host, root_argument, name)
         network_required = False
 
@@ -114,13 +125,16 @@ def _render_install_plan(
     return InstallPlan(
         host=host,
         steps=steps,
-        confirmation_token=_confirmation_token(host, snapshot, source, steps, network_required),
+        confirmation_token=_confirmation_token(
+            host, snapshot, source, source_ref, steps, network_required
+        ),
         network_required=network_required,
         bundle_root=snapshot.root,
         bundle_fingerprint=snapshot.fingerprint,
         bundle_root_identity=snapshot.root_identity,
         bundle_name=name,
         source=source,
+        source_ref=source_ref,
     )
 
 
@@ -374,12 +388,14 @@ def _is_reparse_point(info: os.stat_result) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
-def _validated_source(host: HostName, source: str | None) -> str | None:
+def _validated_source(
+    host: HostName, source: str | None, source_ref: str | None
+) -> tuple[str | None, str | None]:
     if host == "hermes":
-        return _required_git_source(source)
-    if source is not None:
-        raise SpecError("--source is only supported for Hermes installations.")
-    return None
+        return _required_git_source(source), _optional_immutable_git_ref(source_ref)
+    if source is not None or source_ref is not None:
+        raise SpecError("--source and --source-ref are only supported for Hermes installations.")
+    return None, None
 
 
 def _required_git_source(source: str | None) -> str:
@@ -389,6 +405,15 @@ def _required_git_source(source: str | None) -> str:
     if not _HERMES_GIT_SOURCE.fullmatch(source):
         raise SpecError(_HERMES_SOURCE_ERROR)
     return source
+
+
+def _optional_immutable_git_ref(source_ref: str | None) -> str | None:
+    """Accept only a full commit identity when Hermes is asked to pin its Git source."""
+    if source_ref is None:
+        return None
+    if not isinstance(source_ref, str) or not _HERMES_COMMIT_SHA.fullmatch(source_ref):
+        raise SpecError(_HERMES_SOURCE_REF_ERROR)
+    return source_ref.lower()
 
 
 def _assert_safe_command_argument(value: str, field: str) -> str:
@@ -434,6 +459,7 @@ def _confirmation_token(
     host: HostName,
     snapshot: _BundleSnapshot,
     source: str | None,
+    source_ref: str | None,
     steps: tuple[tuple[str, ...], ...],
     network_required: bool,
 ) -> str:
@@ -445,6 +471,7 @@ def _confirmation_token(
         "host": host,
         "network_required": network_required,
         "source": source,
+        "source_ref": source_ref,
         "steps": steps,
     }
     canonical_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)

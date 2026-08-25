@@ -152,9 +152,9 @@
 
 - [ ] **Step 1: Write failing doctor tests**
 
-    def test_doctor_reports_missing_compatible_backend_and_redacts_secret(fake_config, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-secret-value")
-        diagnostics = run_doctor(fake_config, os.environ)
+    def test_doctor_reports_missing_compatible_backend_and_redacts_secret(fake_config):
+        fake_environment = {"DEEPSEEK_API_KEY": "test-secret-value"}
+        diagnostics = run_doctor(fake_config, fake_environment)
         rendered = json.dumps([item.to_dict() for item in diagnostics])
         assert "UPSTREAM_COMPAT_BACKEND_MISSING" in rendered
         assert "test-secret-value" not in rendered
@@ -225,10 +225,10 @@
         assert "test-secret-value" not in " ".join(invocation.command)
         assert invocation.child_environment["OPENAI_COMPATIBLE_BASE_URL"] == "https://api.deepseek.com"
 
-    def test_live_execution_requires_explicit_network_acknowledgement(valid_config, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-secret-value")
+    def test_live_execution_requires_explicit_network_acknowledgement(valid_config):
+        fake_environment = {"DEEPSEEK_API_KEY": "test-secret-value"}
         with pytest.raises(ExecutionGateError, match="--allow-network"):
-            require_execution_permission(valid_config, False, os.environ)
+            require_execution_permission(valid_config, False, fake_environment)
 
     def test_live_execution_requires_configured_key_environment(valid_config):
         with pytest.raises(ExecutionGateError, match="DEEPSEEK_API_KEY"):
