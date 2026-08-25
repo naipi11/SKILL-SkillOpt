@@ -54,14 +54,20 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     )
 
     for command in (
-        "/plugin marketplace add naipi11/Agent-SkillOpt",
-        "/plugin install agent-skillopt@agent-skillopt",
         "/reload-plugins",
+        "claude plugin marketplace add naipi11/Agent-SkillOpt --scope user",
+        "claude plugin install agent-skillopt@agent-skillopt --scope user --yes",
         "codex plugin marketplace add naipi11/Agent-SkillOpt --ref main",
         "codex plugin add agent-skillopt@agent-skillopt",
+        "hermes plugins install naipi11/Agent-SkillOpt --ref <40-char-sha> --no-enable",
+        "hermes plugins show agent-skillopt",
+        "hermes plugins enable agent-skillopt",
+        "openclaw plugins install <bundle-root>",
     ):
         assert command in readme
-    assert "无需本地 clone" in readme
+    assert "当前 Agent-SkillOpt 插件" in readme
+    assert "已发布版本的本机实际安装快照" in readme
+    assert "当前文档只验证了 CLI/清单契约" not in readme
     assert "Python 3.10+" in readme
     assert "`main` 是可变分支" in readme
     assert "release tag" in readme
@@ -75,7 +81,7 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
         assert "依据ClaudeCode官方插件契约，Gitmarketplace可能会按其设置在后台刷新" in normalized
         assert "初始配置后，即使没有新的明确用户命令，也可能发生远程获取" in normalized
         assert "显式安装或更新同样会访问网络并改变宿主状态" in normalized
-        assert "本项目没有运行真实的远程刷新、更新或安装" in normalized
+        assert "本项目没有运行真实的远程刷新、更新或安装" not in text
         assert "刷新或更新须由用户显式发起" not in text
         assert "刷新或更新必须由用户另行明确执行" not in text
         assert "刷新或更新不是自动行为，必须由用户显式发起" not in text
@@ -86,8 +92,9 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     assert claude_plugin["name"] == codex_plugin["name"] == "agent-skillopt"
     assert codex_plugin["skills"] == ["./skills/"]
 
-    assert "清单/CLI 契约" in compatibility
-    assert "未实际远程安装" in compatibility
+    assert "已实际安装并验证元数据" in compatibility
+    assert "被安全扫描正确阻断" in compatibility
+    assert "b9c38b8d0fcfc4aaffc98c4d6b91bfe8f8f80c70" in compatibility
     assert "后台刷新" in compatibility
     assert "可变分支" in compatibility
     assert "release tag" in compatibility
@@ -95,8 +102,8 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     assert "40 位 commit SHA" in compatibility
     assert "相同的 ref 语义" in compatibility
     assert "不可变 tag" not in compatibility
-    assert "CLI 命令契约" in security
-    assert "实际远程安装" in security
+    assert "实际 Codex/Claude 安装" in security
+    assert "兼容性矩阵" in security
     assert "后台刷新" in security
     assert "可变分支" in security
     assert "release tag" in security
@@ -117,6 +124,70 @@ def test_docs_record_safe_host_boundaries_and_openclaw_status(project_root: Path
         assert boundary in security
     assert "Hermes" in compatibility
     assert "Claude Code" in compatibility
+
+
+def test_docs_distinguish_project_installation_from_generated_bundle_installation(
+    project_root: Path,
+):
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    skill = (project_root / "skills" / "agent-skillopt" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    host_installation = (
+        project_root / "skills" / "agent-skillopt" / "references" / "host-installation.md"
+    ).read_text(encoding="utf-8")
+
+    assert "安装当前 Agent-SkillOpt 插件" in readme
+    assert "而非下文示例中由它创建的" in readme
+    assert "`release-notes` bundle" in readme
+    assert "--source-ref <40-char-sha>" in readme
+    assert "--source-ref <40-char-sha>" in skill
+    assert "--source-ref" in host_installation
+    assert "plugins show <name>" in host_installation
+    assert (
+        "`hermes plugins install <owner>/<repository> --ref <40-char-sha> --no-enable`"
+        "<br>`hermes plugins enable release-notes`"
+    ) in readme
+    assert "hermes plugins show release-notes" not in readme
+    assert (
+        "`hermes plugins install <owner>/<repository> --ref <40-char-sha> --no-enable`，"
+        "再 `hermes plugins enable <name>`"
+    ) in host_installation
+
+
+def test_docs_record_non_atomic_recovery_and_manifest_version_parity(project_root: Path):
+    root_manifest = json.loads((project_root / "plugin.json").read_text(encoding="utf-8"))
+    codex_manifest = json.loads(
+        (project_root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    claude_manifest = json.loads(
+        (project_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    pyproject = (project_root / "pyproject.toml").read_text(encoding="utf-8")
+    package_init = (project_root / "src" / "agent_skillopt" / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+    documents = [
+        (project_root / "README.md").read_text(encoding="utf-8"),
+        (project_root / "docs" / "compatibility.md").read_text(encoding="utf-8"),
+        (project_root / "docs" / "security.md").read_text(encoding="utf-8"),
+    ]
+
+    assert (
+        root_manifest["version"]
+        == codex_manifest["version"]
+        == claude_manifest["version"]
+        == "0.2.1"
+    )
+    assert 'version = "0.2.1"' in pyproject
+    assert '__version__ = "0.2.1"' in package_init
+    for text in documents:
+        assert "原子" in text
+        assert "40 位 commit SHA" in text
+        assert "OpenClaw" in text
+    assert "OpenClaw 未在本机验证" in documents[0]
+    assert "OpenClaw 未本机安装" in documents[1]
+    assert "OpenClaw 未本机安装验证" in documents[2]
 
 
 def test_migration_retains_a_clear_legacy_pin_and_retired_docs_are_absent(project_root: Path):

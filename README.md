@@ -17,36 +17,77 @@ Agent-SkillOpt 是中文优先的离线 Skill 创作器：一个可移植的 [Ag
 Code marketplace、Hermes Agent 便携包、OpenClaw 兼容包发现。创建和验证不会发起网络、读取
 secret、安装依赖或执行生成 Skill 的脚本。
 
-## 远程 marketplace 快速安装（无需本地 clone）
+## 安装当前 Agent-SkillOpt 插件
 
-若只需使用本项目随仓库分发的 `agent-skillopt` Skill，可直接让宿主从 GitHub marketplace
-获取；不需要本地 clone。本段命令会访问网络，并改变宿主的用户级 marketplace、缓存或已安装
-插件状态，执行前请审查来源并自行决定是否继续。
+本节安装的是此仓库已发布的 `agent-skillopt` 插件本身，而非下文示例中由它创建的
+`release-notes` bundle。以下命令会访问网络并改变对应宿主的用户级 marketplace、缓存、插件
+状态或网关；请先审查 `naipi11/Agent-SkillOpt`，再逐条执行。已发布版本的本机实际安装快照，以及
+0.2.1 候选树的 CLI/清单契约、未验证宿主和恢复边界，均记录在[兼容性矩阵](docs/compatibility.md)；它们不等同于
+Skill 脚手架在任意项目或任意宿主中已经运行成功。
 
-**Claude Code 对话内 slash commands：**
-
-```text
-/plugin marketplace add naipi11/Agent-SkillOpt
-/plugin install agent-skillopt@agent-skillopt
-/reload-plugins
-```
-
-**Codex 终端 CLI：**
+### Codex
 
 ```powershell
 codex plugin marketplace add naipi11/Agent-SkillOpt --ref main
 codex plugin add agent-skillopt@agent-skillopt
 ```
 
+### Claude Code
+
+```powershell
+claude plugin marketplace add naipi11/Agent-SkillOpt --scope user
+claude plugin install agent-skillopt@agent-skillopt --scope user --yes
+```
+
+若当前会话未加载新插件，可在 Claude Code 对话中执行 `/reload-plugins`；这是会话相关的可选操作，
+不是安装步骤本身。
+
+### Hermes Agent
+
+Hermes 的远程安装应固定到精确的 40 位 commit SHA。先将 `<40-char-sha>` 替换为你已独立复核的
+Git commit，再安装但不启用、检查元数据，最后才启用：
+
+```powershell
+hermes plugins install naipi11/Agent-SkillOpt --ref <40-char-sha> --no-enable
+hermes plugins show agent-skillopt
+hermes plugins enable agent-skillopt
+```
+
+### OpenClaw
+
+本机未安装 OpenClaw CLI，因此下列是按本地、已验证 bundle 根目录的兼容流程记录，**不是本机
+安装成功证据**。将 `<bundle-root>` 替换为经 `validate` 验证过的绝对目录，再在目标环境执行：
+
+```text
+openclaw plugins install <bundle-root>
+openclaw plugins inspect agent-skillopt
+openclaw gateway restart
+```
+
 `main` 是可变分支，后续提交可能改变同一 ref 的内容。Codex 当前本地 CLI 的 `--ref` 可指定 ref；
-上面的 Claude Code GitHub 简写则使用默认分支（当前为 `main`）。不要把两者当作相同的 ref 语义。
+Claude 的 GitHub 简写使用默认分支（当前为 `main`）。不要把两者当作相同的 ref 语义。
 Claude 的远程 marketplace source 使用 branch/tag ref，不承诺能以 commit SHA 固定安装。release tag
 也只是 Git ref，不天然不可变：只能在受保护且受信任时使用，并应在 release notes 中记录、复核其
 解析出的 40 位 commit SHA，以审计并确认精确内容身份。依据 Claude Code 官方插件契约，Git
 marketplace 可能会按其设置在后台刷新；初始配置后，即使没有新的明确用户命令，也可能发生远程获取。
-显式安装或更新同样会访问网络并改变宿主状态；本项目没有运行真实的远程刷新、更新或安装。安装后的
-脚手架实际执行时需要 Python 3.10+；仅完成
+显式安装或更新同样会访问网络并改变宿主状态。本机在 2026-08-25 完成的安装/阻断快照见
+[兼容性矩阵](docs/compatibility.md)，其中的单机结果不能泛化为所有版本或宿主。安装后的脚手架实际执行时需要 Python 3.10+；仅完成
 marketplace 获取并不等同于已经运行脚手架。
+
+### 失败时的检查与恢复
+
+上述多步骤安装**不是原子事务**：marketplace 已添加而 plugin install 失败、Hermes 已下载而尚未
+enable、或 OpenClaw 已安装但 gateway restart 失败，都可能留下部分状态。先停止后续步骤，再进行
+只读检查：Codex 使用 `codex plugin list`，Claude Code 使用 `claude plugin list`，Hermes 使用
+`hermes plugins show agent-skillopt`。确认实际状态和错误原因后，按该宿主官方文档移除残留 marketplace/
+plugin 或重试缺失步骤；不要在未检查状态时重复整组命令。OpenClaw 未在本机验证，本文不杜撰其检查或
+移除命令；请仅参照目标环境的 OpenClaw 文档和其实际输出恢复。
+
+### 维护者发布规则
+
+`pyproject.toml`、`src/agent_skillopt/__init__.py`、`plugin.json`、`.codex-plugin/plugin.json` 和
+`.claude-plugin/plugin.json` 当前都声明静态版本 `0.2.1`。以后发布会改变远程插件内容的提交时，必须将
+这五处版本同步递增并在发布说明中记录解析后的 40 位 commit SHA；否则已安装宿主可能继续把它视作同一版本而不更新。
 
 ## 本地生成 Skill 的安全工作流
 
@@ -92,10 +133,11 @@ Codex、Claude 和 OpenClaw 的本地包计划不需要 source；下面命令只
 python "$skillDirectory\scripts\scaffold_bundle.py" install --host <codex|claude|openclaw> --path "$bundleRoot"
 ```
 
-Hermes 必须提供明确的 `<owner>/<repository>` Git source；这同样只渲染计划，不访问网络或执行宿主命令：
+Hermes 必须提供明确的 `<owner>/<repository>` Git source；这同样只渲染计划，不访问网络或执行宿主命令。
+可选的 `--source-ref` 仅接受精确 40 位 commit SHA，并把它映射为随后 Hermes 命令的 `--ref`：
 
 ```powershell
-python "$skillDirectory\scripts\scaffold_bundle.py" install --host hermes --path "$bundleRoot" --source <owner>/<repository>
+python "$skillDirectory\scripts\scaffold_bundle.py" install --host hermes --path "$bundleRoot" --source <owner>/<repository> --source-ref <40-char-sha>
 ```
 
 每一步是一个 argv 元组，路径永远是一个参数而不是 shell 拼接。`<bundle-root>` 必须替换为
@@ -106,10 +148,11 @@ python "$skillDirectory\scripts\scaffold_bundle.py" install --host hermes --path
 | --- | --- |
 | [Codex](https://help.openai.com/en/articles/20001256-plugins-in-codex/) | `codex plugin marketplace add <bundle-root>`<br>`codex plugin add release-notes@release-notes` |
 | [Claude Code](https://code.claude.com/docs/en/plugins-reference) | `claude plugin marketplace add <bundle-root>`<br>`claude plugin install release-notes@release-notes` |
-| [Hermes Agent](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins) | `hermes plugins install <owner>/<repository> --no-enable`<br>`hermes plugins enable release-notes` |
+| [Hermes Agent](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins) | `hermes plugins install <owner>/<repository> --ref <40-char-sha> --no-enable`<br>`hermes plugins enable release-notes` |
 | [OpenClaw](https://docs.openclaw.ai/plugins/bundles) | `openclaw plugins install <bundle-root>`<br>`openclaw plugins inspect release-notes`<br>`openclaw gateway restart` |
 
-Hermes 需要明确的 `<owner>/<repository>` Git source（不是裸索引名、本地路径或 URL），会访问网络且远程内容可变。**Hermes Git install/enable
+Hermes 需要明确的 `<owner>/<repository>` Git source（不是裸索引名、本地路径或 URL），会访问网络且远程内容可变；
+`--source-ref` 可选但建议使用，并且只能是精确 40 位 commit SHA。**Hermes Git install/enable
 和 OpenClaw gateway restart 都是外部状态变更，绝不能因“渲染计划”自动执行。** Codex 与
 Claude 的 marketplace/add/install 也会改变用户级宿主状态。安装 token 绑定宿主、已验证路径、
 内容快照、命令及 Hermes source，但不 pin 远端 commit，也不能替代权限和来源审查。

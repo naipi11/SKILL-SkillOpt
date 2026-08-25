@@ -10,7 +10,6 @@ import pytest
 from agent_skillopt.cli import main
 from agent_skillopt.errors import ConfirmationError, SpecError
 from agent_skillopt.installation import build_install_plan, execute_install
-from agent_skillopt.models import InstallPlan
 from agent_skillopt.validation import BundleValidationError
 
 
@@ -97,10 +96,36 @@ def test_hermes_plan_marks_the_explicit_source_as_network_required(valid_bundle:
     assert plan.network_required is True
 
 
+def test_hermes_plan_can_pin_an_immutable_remote_commit(valid_bundle: Path):
+    source_ref = "a" * 40
+
+    plan = build_install_plan("hermes", valid_bundle, "owner/repository", source_ref)
+
+    assert plan.source_ref == source_ref
+    assert plan.steps == (
+        ("hermes", "plugins", "install", "owner/repository", "--ref", source_ref, "--no-enable"),
+        ("hermes", "plugins", "enable", "minimal-skill"),
+    )
+
+
+@pytest.mark.parametrize(
+    "source_ref", ("a" * 39, "a" * 41, "main", "owner/repository", "a" * 39 + "!")
+)
+def test_hermes_plan_rejects_a_non_immutable_source_ref(source_ref: str, valid_bundle: Path):
+    with pytest.raises(SpecError, match="--source-ref"):
+        build_install_plan("hermes", valid_bundle, "owner/repository", source_ref)
+
+
 @pytest.mark.parametrize("host", ("codex", "claude", "openclaw"))
 def test_local_hosts_reject_an_inappropriate_source(host: str, valid_bundle: Path):
     with pytest.raises(SpecError, match="--source"):
         build_install_plan(host, valid_bundle, "owner/repository")
+
+
+@pytest.mark.parametrize("host", ("codex", "claude", "openclaw"))
+def test_local_hosts_reject_an_inappropriate_source_ref(host: str, valid_bundle: Path):
+    with pytest.raises(SpecError, match="--source-ref"):
+        build_install_plan(host, valid_bundle, None, "a" * 40)
 
 
 def test_build_plan_rejects_an_unsupported_host(valid_bundle: Path):
@@ -119,9 +144,11 @@ def test_plan_token_is_deterministic_and_captures_the_rendered_operation(valid_b
     first = build_install_plan("hermes", valid_bundle, "owner/repository")
     second = build_install_plan("hermes", valid_bundle, "owner/repository")
     changed_source = build_install_plan("hermes", valid_bundle, "owner/other-repository")
+    pinned_source = build_install_plan("hermes", valid_bundle, "owner/repository", "a" * 40)
 
     assert first.confirmation_token == second.confirmation_token
     assert first.confirmation_token != changed_source.confirmation_token
+    assert first.confirmation_token != pinned_source.confirmation_token
 
 
 @pytest.mark.parametrize(
@@ -223,17 +250,7 @@ def test_execute_install_rejects_a_root_that_becomes_a_link_without_a_runner(
 
 def test_execute_install_rebuilds_a_forged_plan_before_any_runner(valid_bundle: Path):
     rendered = build_install_plan("codex", valid_bundle, None)
-    forged = InstallPlan(
-        host="codex",
-        steps=(("untrusted-program", "--do-the-thing"),),
-        confirmation_token="attacker-selected-token",
-        network_required=False,
-        bundle_root=rendered.bundle_root,
-        bundle_fingerprint=rendered.bundle_fingerprint,
-        bundle_root_identity=rendered.bundle_root_identity,
-        bundle_name=rendered.bundle_name,
-        source=None,
-    )
+    forged = replace(rendered, steps=(("untrusted-program", "--do-the-thing"),))
     calls: list[tuple[str, ...]] = []
 
     with pytest.raises(ConfirmationError, match="stale"):
@@ -249,6 +266,7 @@ def test_execute_install_rebuilds_a_forged_plan_before_any_runner(valid_bundle: 
         "host",
         "network_required",
         "source",
+        "source_ref",
         "bundle_root",
         "bundle_fingerprint",
         "bundle_root_identity",
@@ -265,11 +283,12 @@ def test_execute_install_rejects_each_altered_stored_plan_invariant(
         "host": "unsupported-host",
         "network_required": False,
         "source": "owner/other-repository",
+        "source_ref": "a" * 40,
         "bundle_root": tmp_path / "other-bundle",
         "bundle_fingerprint": "0" * 64,
         "bundle_root_identity": (0, 0),
         "bundle_name": "other-skill",
-        "confirmation_token": "attacker-selected-token",
+        "confirmation_token": _different_confirmation(rendered.confirmation_token),
     }
     forged = replace(rendered, **{field: replacements[field]})
     calls: list[tuple[str, ...]] = []
@@ -531,11 +550,53 @@ def test_install_command_renders_json_without_running_a_host_command(
     assert rendered == {
         "confirmation_token": build_install_plan("codex", valid_bundle, None).confirmation_token,
         "network_required": False,
+        "source": None,
+        "source_ref": None,
         "steps": [
             ["codex", "plugin", "marketplace", "add", str(valid_bundle)],
             ["codex", "plugin", "add", "minimal-skill@minimal-skill"],
         ],
     }
+
+
+def test_install_command_renders_a_pinned_hermes_source_without_running_a_host_command(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path, capsys
+):
+    def unexpected_subprocess(*args: object, **kwargs: object) -> None:
+        raise AssertionError("rendering must not start a subprocess")
+
+    source_ref = "a" * 40
+    monkeypatch.setattr("agent_skillopt.cli.subprocess.run", unexpected_subprocess)
+
+    assert (
+        main(
+            [
+                "install",
+                "--host",
+                "hermes",
+                "--path",
+                str(valid_bundle),
+                "--source",
+                "owner/repository",
+                "--source-ref",
+                source_ref,
+            ]
+        )
+        == 0
+    )
+
+    rendered = json.loads(capsys.readouterr().out)
+    assert rendered["source"] == "owner/repository"
+    assert rendered["source_ref"] == source_ref
+    assert rendered["steps"][0] == [
+        "hermes",
+        "plugins",
+        "install",
+        "owner/repository",
+        "--ref",
+        source_ref,
+        "--no-enable",
+    ]
 
 
 def test_install_execute_rejects_a_missing_or_wrong_token_without_subprocess(
@@ -632,6 +693,77 @@ def test_install_execute_reports_a_runner_os_error_without_a_traceback(
     assert "Traceback" not in error_output
 
 
+def test_install_execute_reports_partial_host_state_after_a_later_runner_os_error(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path, capsys
+):
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...], *, shell: bool, check: bool) -> SimpleNamespace:
+        calls.append(command)
+        if len(calls) == 1:
+            return SimpleNamespace(returncode=0)
+        raise FileNotFoundError("host command disappeared between steps")
+
+    plan = build_install_plan("codex", valid_bundle, None)
+    monkeypatch.setattr("agent_skillopt.cli.subprocess.run", runner)
+
+    assert (
+        main(
+            [
+                "install",
+                "--host",
+                "codex",
+                "--path",
+                str(valid_bundle),
+                "--execute",
+                "--confirm",
+                plan.confirmation_token,
+            ]
+        )
+        == 1
+    )
+
+    assert calls == list(plan.steps)
+    error_output = capsys.readouterr().err
+    assert "无法启动宿主命令" in error_output
+    assert "已成功执行 1/2 步" in error_output
+    assert "部分改变" in error_output
+
+
+def test_install_execute_reports_partial_host_state_after_a_later_failed_step(
+    monkeypatch: pytest.MonkeyPatch, valid_bundle: Path, capsys
+):
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...], *, shell: bool, check: bool) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(returncode=0 if len(calls) == 1 else 7)
+
+    plan = build_install_plan("openclaw", valid_bundle, None)
+    monkeypatch.setattr("agent_skillopt.cli.subprocess.run", runner)
+
+    assert (
+        main(
+            [
+                "install",
+                "--host",
+                "openclaw",
+                "--path",
+                str(valid_bundle),
+                "--execute",
+                "--confirm",
+                plan.confirmation_token,
+            ]
+        )
+        == 7
+    )
+
+    assert calls == list(plan.steps[:2])
+    error_output = capsys.readouterr().err
+    assert "已成功执行 1/3 步" in error_output
+    assert "部分改变" in error_output
+
+
 def test_hermes_render_warning_describes_the_mutable_remote_content_boundary(
     valid_bundle: Path, capsys
 ):
@@ -654,3 +786,36 @@ def test_hermes_render_warning_describes_the_mutable_remote_content_boundary(
     assert "执行时" in warning
     assert "远程内容" in warning
     assert "可能变化" in warning
+
+
+def test_hermes_pinned_render_warning_preserves_the_commit_identity(
+    valid_bundle: Path, capsys
+):
+    source_ref = "a" * 40
+
+    assert (
+        main(
+            [
+                "install",
+                "--host",
+                "hermes",
+                "--path",
+                str(valid_bundle),
+                "--source",
+                "owner/repository",
+                "--source-ref",
+                source_ref,
+            ]
+        )
+        == 0
+    )
+
+    warning = capsys.readouterr().err
+    assert "固定到指定 40 位 commit" in warning
+    assert "可能变化" not in warning
+
+
+def _different_confirmation(value: str) -> str:
+    """Return a different non-secret placeholder while preserving the exact token shape."""
+    last_character = "0" if value[-1] != "0" else "1"
+    return value[:-1] + last_character

@@ -122,22 +122,33 @@ def _subprocess_runner(command: tuple[str, ...]) -> int:
 def _install_handler(arguments: argparse.Namespace) -> int:
     """Render a host plan, or run it only through the exact confirmation gate."""
     try:
-        plan = build_install_plan(arguments.host, arguments.path, arguments.source)
+        plan = build_install_plan(
+            arguments.host, arguments.path, arguments.source, arguments.source_ref
+        )
     except AgentSkillOptError:
         print("安装计划失败：Skill 包或安装参数无效。", file=sys.stderr)
         return 2
 
     if plan.network_required:
-        print(
-            "警告：执行时会从指定 Git 源获取远程内容；远程内容可能变化，这是信任边界，"
-            "确认令牌不固定远程修订。",
-            file=sys.stderr,
-        )
+        if plan.source_ref is None:
+            print(
+                "警告：执行时会从指定 Git 源获取远程内容；远程内容可能变化，这是信任边界，"
+                "确认令牌不固定远程修订。",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "警告：执行时会从指定 Git 源获取远程内容；--source-ref 固定到指定 40 位 commit，"
+                "但确认令牌不能替代来源审查或权限判断。",
+                file=sys.stderr,
+            )
     print(
         json.dumps(
             {
                 "confirmation_token": plan.confirmation_token,
                 "network_required": plan.network_required,
+                "source": plan.source,
+                "source_ref": plan.source_ref,
                 "steps": [list(step) for step in plan.steps],
             },
             ensure_ascii=False,
@@ -147,18 +158,37 @@ def _install_handler(arguments: argparse.Namespace) -> int:
     if not arguments.execute:
         return 0
 
+    completed_steps: list[tuple[str, ...]] = []
+
+    def tracked_runner(command: tuple[str, ...]) -> int:
+        status = _subprocess_runner(command)
+        if status == 0:
+            completed_steps.append(command)
+        return status
+
+    def report_incomplete_install() -> None:
+        print(
+            f"安装未完成：已成功执行 {len(completed_steps)}/{len(plan.steps)} 步；"
+            "宿主状态可能已部分改变，请按文档检查或清理后重试。",
+            file=sys.stderr,
+        )
+
     try:
-        return execute_install(plan, arguments.confirm, _subprocess_runner)
+        status = execute_install(plan, arguments.confirm, tracked_runner)
     except ConfirmationError:
         print("安装失败：确认令牌无效。", file=sys.stderr)
         return 2
     except OSError:
         print("安装执行失败：无法启动宿主命令。", file=sys.stderr)
+        report_incomplete_install()
         return 1
+    if status != 0:
+        report_incomplete_install()
+    return status
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Build the 0.2.0 command parser."""
+    """Build the 0.2.1 command parser."""
     parser = argparse.ArgumentParser(
         prog="agent-skillopt",
         description="Agent-SkillOpt：跨宿主 Skill 创作工具。",
@@ -186,6 +216,9 @@ def _build_parser() -> argparse.ArgumentParser:
     install.add_argument("--execute", action="store_true")
     install.add_argument("--confirm")
     install.add_argument("--source", help="Hermes 明确的 <owner>/<repository> Git 安装源。")
+    install.add_argument(
+        "--source-ref", help="Hermes 可选的固定 40 位 Git commit SHA（映射到 hermes --ref）。"
+    )
     install.set_defaults(handler=_install_handler)
     return parser
 
