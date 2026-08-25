@@ -23,8 +23,10 @@ entry point。编辑包时，安装计划的稳定快照会故意拒绝变化并
 
 远程 marketplace 安装与本地生成包安装是两条不同路径。README 中的 Claude slash commands 和
 Codex CLI 命令只具有清单/CLI 契约证据，不是实际远程安装成功的证据；它们会访问网络并改变用户
-状态。刷新或更新必须由用户另行明确执行，并需要网络；本项目没有测试实际远程刷新、更新或安装。
-`main` 是可变分支，远端内容可随分支推进而漂移。Codex 当前本地 CLI 支持 `--ref`，而 Claude
+状态。依据 Claude Code 官方插件契约，Git marketplace 可能会按其设置在后台刷新；初始配置后，即使
+没有新的明确用户命令，也可能发生远程获取。显式安装或更新同样会访问网络并改变宿主状态；本项目没有
+运行真实的远程刷新、更新或安装。`main` 是可变分支，远端内容可随分支推进而漂移。Codex 当前本地 CLI
+支持 `--ref`，而 Claude
 远程 GitHub 简写使用默认分支（当前为 `main`）；两者不应被表述为相同的 ref 语义。release tag 也
 只是 Git ref，并非天然不可变；仅在受保护且受信任时使用，并在 release notes 中记录、复核其解析
 出的 40 位 commit SHA，作为精确内容身份的审计/验证事实。Claude 远程 marketplace source 仅支持

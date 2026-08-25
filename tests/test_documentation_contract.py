@@ -70,6 +70,16 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     assert "相同的 ref 语义" in readme
     assert "不可变 tag" not in readme
 
+    for text in (readme, compatibility, security):
+        normalized = "".join(text.split())
+        assert "依据ClaudeCode官方插件契约，Gitmarketplace可能会按其设置在后台刷新" in normalized
+        assert "初始配置后，即使没有新的明确用户命令，也可能发生远程获取" in normalized
+        assert "显式安装或更新同样会访问网络并改变宿主状态" in normalized
+        assert "本项目没有运行真实的远程刷新、更新或安装" in normalized
+        assert "刷新或更新须由用户显式发起" not in text
+        assert "刷新或更新必须由用户另行明确执行" not in text
+        assert "刷新或更新不是自动行为，必须由用户显式发起" not in text
+
     for marketplace in (claude_marketplace, agents_marketplace):
         assert marketplace["name"] == "agent-skillopt"
         assert marketplace["plugins"] == [{"name": "agent-skillopt", "source": "./"}]
@@ -78,7 +88,7 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
 
     assert "清单/CLI 契约" in compatibility
     assert "未实际远程安装" in compatibility
-    assert "刷新或更新" in compatibility
+    assert "后台刷新" in compatibility
     assert "可变分支" in compatibility
     assert "release tag" in compatibility
     assert "天然不可变" in compatibility
@@ -87,7 +97,7 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     assert "不可变 tag" not in compatibility
     assert "CLI 命令契约" in security
     assert "实际远程安装" in security
-    assert "刷新或更新" in security
+    assert "后台刷新" in security
     assert "可变分支" in security
     assert "release tag" in security
     assert "天然不可变" in security

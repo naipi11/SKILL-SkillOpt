@@ -42,8 +42,10 @@ codex plugin add agent-skillopt@agent-skillopt
 上面的 Claude Code GitHub 简写则使用默认分支（当前为 `main`）。不要把两者当作相同的 ref 语义。
 Claude 的远程 marketplace source 使用 branch/tag ref，不承诺能以 commit SHA 固定安装。release tag
 也只是 Git ref，不天然不可变：只能在受保护且受信任时使用，并应在 release notes 中记录、复核其
-解析出的 40 位 commit SHA，以审计并确认精确内容身份。刷新或更新须由用户显式发起，且会访问网络；
-本项目没有测试实际的远程刷新、更新或安装。安装后的脚手架实际执行时需要 Python 3.10+；仅完成
+解析出的 40 位 commit SHA，以审计并确认精确内容身份。依据 Claude Code 官方插件契约，Git
+marketplace 可能会按其设置在后台刷新；初始配置后，即使没有新的明确用户命令，也可能发生远程获取。
+显式安装或更新同样会访问网络并改变宿主状态；本项目没有运行真实的远程刷新、更新或安装。安装后的
+脚手架实际执行时需要 Python 3.10+；仅完成
 marketplace 获取并不等同于已经运行脚手架。
 
 ## 本地生成 Skill 的安全工作流
