@@ -37,6 +37,7 @@ def test_readme_does_not_reintroduce_retired_provider_or_credential_claims(proje
 
 
 def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(project_root: Path):
+    published_sha = "9a3c9e1765a5ff0561af5221906879670f5c4536"
     readme = (project_root / "README.md").read_text(encoding="utf-8")
     compatibility = (project_root / "docs" / "compatibility.md").read_text(encoding="utf-8")
     security = (project_root / "docs" / "security.md").read_text(encoding="utf-8")
@@ -54,19 +55,18 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     )
 
     for command in (
-        "/reload-plugins",
         "claude plugin marketplace add naipi11/Agent-SkillOpt --scope user",
         "claude plugin install agent-skillopt@agent-skillopt --scope user --yes",
-        "codex plugin marketplace add naipi11/Agent-SkillOpt --ref main",
+        f"codex plugin marketplace add naipi11/Agent-SkillOpt --ref {published_sha}",
         "codex plugin add agent-skillopt@agent-skillopt",
-        "hermes plugins install naipi11/Agent-SkillOpt --ref <40-char-sha> --no-enable",
+        f"hermes plugins install naipi11/Agent-SkillOpt --ref {published_sha} --no-enable",
         "hermes plugins show agent-skillopt",
         "hermes plugins enable agent-skillopt",
         "openclaw plugins install <bundle-root>",
     ):
         assert command in readme
     assert "当前 Agent-SkillOpt 插件" in readme
-    assert "已发布版本的本机实际安装快照" in readme
+    assert "已发布 `v0.2.1` 的本机实际安装快照" in readme
     assert "当前文档只验证了 CLI/清单契约" not in readme
     assert "Python 3.10+" in readme
     assert "`main` 是可变分支" in readme
@@ -93,8 +93,9 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     assert codex_plugin["skills"] == ["./skills/"]
 
     assert "已实际安装并验证元数据" in compatibility
-    assert "被安全扫描正确阻断" in compatibility
-    assert "b9c38b8d0fcfc4aaffc98c4d6b91bfe8f8f80c70" in compatibility
+    assert "已实际安装并启用" in compatibility
+    assert published_sha in compatibility
+    assert "扫描阻断" not in compatibility
     assert "后台刷新" in compatibility
     assert "可变分支" in compatibility
     assert "release tag" in compatibility
@@ -102,7 +103,7 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
     assert "40 位 commit SHA" in compatibility
     assert "相同的 ref 语义" in compatibility
     assert "不可变 tag" not in compatibility
-    assert "实际 Codex/Claude 安装" in security
+    assert "实际 Codex/Claude/Hermes 安装" in security
     assert "兼容性矩阵" in security
     assert "后台刷新" in security
     assert "可变分支" in security
