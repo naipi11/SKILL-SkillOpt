@@ -5,21 +5,20 @@ Codex、Claude Code、Hermes Agent、OpenClaw 四个适配面。结构校验、�
 
 | 范围 | 实际命令/契约 | 本机证据（Windows，2026-08-25） | 状态 |
 | --- | --- | --- | --- |
-| 根结构 | `C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe scripts\\validate_bundle.py .` | 0.2.1 候选树退出 0，输出 `VALID`；只检查清单和共享 Skill 结构。 | 结构已验证；不等同于宿主运行 |
-| Codex 远程 marketplace | `codex plugin marketplace add naipi11/Agent-SkillOpt --ref b9c38b8d0fcfc4aaffc98c4d6b91bfe8f8f80c70` → `codex plugin add agent-skillopt@agent-skillopt` | 已成功添加 marketplace；其本地 Git 快照 `HEAD` 为该 SHA；`codex plugin list --available --json` 显示 `agent-skillopt@agent-skillopt` v0.2.0、`installed: true`、`enabled: true`。 | 已实际安装并验证元数据；未证明 Skill 已在新 task 运行 |
-| Claude Code 远程 marketplace | `claude plugin marketplace add naipi11/Agent-SkillOpt --scope user` → `claude plugin install agent-skillopt@agent-skillopt --scope user --yes` | 已成功安装 user scope；marketplace 本地 Git 快照 `HEAD` 为 `b9c38b8d0fcfc4aaffc98c4d6b91bfe8f8f80c70`；`claude plugin list --json` 显示 v0.2.0、`enabled: true`。未在对话中执行 `/reload-plugins`。 | 已实际安装并验证元数据；未证明当前/新会话已加载 |
-| Hermes Agent | `hermes plugins install naipi11/Agent-SkillOpt --ref b9c38b8d0fcfc4aaffc98c4d6b91bfe8f8f80c70 --no-enable` → `hermes plugins show agent-skillopt` → `hermes plugins enable agent-skillopt --no-allow-tool-override` | 默认安装安全扫描把已发布的 0.2.0 树判为 `dangerous` 并阻断；`show` 返回未找到，未启用、未修改 `plugins.scan_on_install`。 | 被安全扫描正确阻断；未安装、未启用 |
+| 根结构 | `C:\\Users\\33384\\Documents\\ChatGPT\\Agent-SkillOpt\\.venv\\Scripts\\python.exe scripts\\validate_bundle.py .` | 已发布 `v0.2.1` 树退出 0，输出 `VALID`；只检查清单和共享 Skill 结构。 | 结构已验证；不等同于宿主运行 |
+| Codex 远程 marketplace | `codex plugin marketplace remove agent-skillopt` → `codex plugin marketplace add naipi11/Agent-SkillOpt --ref 9a3c9e1765a5ff0561af5221906879670f5c4536` → `codex plugin add agent-skillopt@agent-skillopt` | marketplace checkout、`last_revision` 与 `ref` 均为该 SHA；`codex plugin list --available --json` 显示 `agent-skillopt@agent-skillopt` v0.2.1、`installed: true`、`enabled: true`。 | 已实际安装并验证元数据；未证明 Skill 已在新 task 运行 |
+| Claude Code 远程 marketplace | `claude plugin marketplace update agent-skillopt` → `claude plugin update agent-skillopt@agent-skillopt --scope user --yes` | marketplace 本地 Git 快照 `HEAD` 为 `9a3c9e1765a5ff0561af5221906879670f5c4536`；`claude plugin list --json` 显示 user scope v0.2.1、`enabled: true`。CLI 报告重启后才应用。 | 已实际安装并验证元数据；当前会话尚需重启，未证明运行 |
+| Hermes Agent | `hermes plugins install naipi11/Agent-SkillOpt --ref 9a3c9e1765a5ff0561af5221906879670f5c4536 --no-enable` → `hermes plugins show agent-skillopt` → `hermes plugins enable agent-skillopt` | 默认扫描未阻断安装；`show` 显示 v0.2.1、`Status: enabled`；配置为 `allow_tool_override: false`，CLI 报告下一个 session 生效。 | 已实际安装并启用；尚未证明新 session 运行 |
 | OpenClaw | [bundle contract](https://docs.openclaw.ai/plugins/bundles) | 本机没有 `openclaw` CLI；未执行 install、inspect 或 gateway restart。 | 合约目标；未本机安装验证 |
-| 本地 bundle 执行器 | `scaffold_bundle.py install --host hermes --path . --source naipi11/Agent-SkillOpt --source-ref <40-char-sha>` | 0.2.1 候选树只读渲染了绑定 SHA 的 token/argv；未传 `--execute`，没有运行宿主命令。 | 计划/确认契约已验证；不是安装成功证据 |
+| 本地 bundle 执行器 | `scaffold_bundle.py install --host hermes --path . --source naipi11/Agent-SkillOpt --source-ref <40-char-sha>` | 已发布 `v0.2.1` 树只读渲染了绑定 SHA 的 token/argv；未传 `--execute`，没有运行宿主命令。 | 计划/确认契约已验证；不是安装成功证据 |
 
-上述 Codex 与 Claude Code 证据只针对已发布 commit
-`b9c38b8d0fcfc4aaffc98c4d6b91bfe8f8f80c70` 的 0.2.0 内容：没有执行 refresh、update 或 Claude 对话
-reload，也没有运行安装后的 Skill。候选 0.2.1 树修复了 Hermes 计划的不可变 ref、失败报告和扫描误报，
-但尚未发布，因此不能被表述为已在远端宿主安装。
+上述 Codex、Claude Code 与 Hermes 证据针对已发布 commit
+`9a3c9e1765a5ff0561af5221906879670f5c4536` 的 `v0.2.1`：Codex 已安装/启用并 pin 到该 SHA；
+Claude Code 已在 user scope 安装/启用但需重启；Hermes 已安装/启用、`allow_tool_override: false`，
+于下一个 session 生效。三者均未证明安装后 Skill 已实际运行。
 
 Hermes 依照其[安装时安全扫描规则](https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins)
-阻止了已发布树。候选树已用同一 `plugin_guard` 复扫为 `safe`（仍有受审查的 medium 提示：受控的
-`shell=False` 子进程、CI 安装和大 GIF），但只有在发布后重新扫描和安装成功才能更新 Hermes 状态。不得关闭
+完成了 `v0.2.1` 的安装和启用，且未开启 `allow_tool_override`。这不是 Skill 已实际运行的证据；不得关闭
 `plugins.scan_on_install`，也不得尝试用 `--force` 绕过 `dangerous` verdict。
 
 远程项目安装与本地生成 bundle 安装是两条不同路径。Codex、Claude Code 和 Hermes 命令会访问网络并改变

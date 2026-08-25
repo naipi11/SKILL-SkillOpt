@@ -25,15 +25,17 @@ token 不包含凭据。未提供 `--source-ref` 时，它不 pin Hermes 远端 
 - 安装本项目 `agent-skillopt` 的远程命令会访问网络：Codex 的 `codex plugin marketplace add`、
   `codex plugin add`，Claude Code 的 `claude plugin marketplace add --scope user`、`claude plugin install
   --scope user --yes`，以及 Hermes 的 `plugins install`。它们都会改变用户级 marketplace、缓存或插件
-  状态；Hermes 的 `enable` 另会启用插件。2026-08-25 的实际 Codex/Claude 安装、Hermes 扫描阻断和
-  OpenClaw 缺失证据记录在[兼容性矩阵](compatibility.md)；这些只证明对应步骤/元数据，不证明 Skill 运行。
+  状态；Hermes 的 `enable` 另会启用插件。2026-08-25 的实际 Codex/Claude/Hermes 安装（Hermes 的
+  `allow_tool_override: false`）和 OpenClaw 缺失证据记录在[兼容性矩阵](compatibility.md)；这些只证明
+  对应步骤/元数据，不证明 Skill 运行。
 - `main` 是可变分支；远端内容可在同一 branch ref 下漂移。Codex 当前本地 CLI 支持 `--ref`，但
   Claude 的远程 GitHub 简写使用默认分支（当前为 `main`），不能把两端表述为相同的 ref 语义；Claude
   远程 marketplace source 只支持 branch/tag ref，不承诺能以 commit SHA 固定安装。release tag 同样
   是 Git ref，不天然不可变，只有受保护且受信任时才可使用；应在 release notes 中记录并复核其解析
   的 40 位 commit SHA，以审计和验证精确内容身份。依据 Claude Code 官方插件契约，Git marketplace
   可能会按其设置在后台刷新；初始配置后，即使没有新的明确用户命令，也可能发生远程获取。显式安装或
-  更新同样会访问网络并改变宿主状态。已执行的单机安装快照不包含 refresh、update 或 Claude 会话 reload。
+  更新同样会访问网络并改变宿主状态。本轮单机快照包括指定的 marketplace/plugin update，但不包含后续
+  refresh/update 或 Skill 实际运行；Claude Code 的 `v0.2.1` 更新需要重启后才会生效。
 - 远程仓库 bootstrap 与本地生成 bundle 的安装计划不同：`scaffold_bundle.py install` 仍只为已经
   创建并离线验证的本地 bundle 渲染计划，不会安装此仓库的远程 marketplace source。
 - Codex 与 Claude Code 的本地 bundle marketplace/add/install 同样改变用户级配置或缓存。
