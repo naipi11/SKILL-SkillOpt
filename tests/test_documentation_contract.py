@@ -36,6 +36,47 @@ def test_readme_does_not_reintroduce_retired_provider_or_credential_claims(proje
     assert "NOTICE" not in active_docs
 
 
+def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(project_root: Path):
+    readme = (project_root / "README.md").read_text(encoding="utf-8")
+    compatibility = (project_root / "docs" / "compatibility.md").read_text(encoding="utf-8")
+    security = (project_root / "docs" / "security.md").read_text(encoding="utf-8")
+    claude_marketplace = json.loads(
+        (project_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    claude_plugin = json.loads(
+        (project_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    codex_plugin = json.loads(
+        (project_root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+
+    for command in (
+        "/plugin marketplace add naipi11/Agent-SkillOpt",
+        "/plugin install agent-skillopt@agent-skillopt",
+        "/reload-plugins",
+        "codex plugin marketplace add naipi11/Agent-SkillOpt --ref main",
+        "codex plugin add agent-skillopt@agent-skillopt",
+    ):
+        assert command in readme
+    assert "无需本地 clone" in readme
+    assert "Python 3.10+" in readme
+    assert "`main` 是可变分支" in readme
+
+    assert claude_marketplace["name"] == "agent-skillopt"
+    assert claude_marketplace["plugins"] == [{"name": "agent-skillopt", "source": "./"}]
+    assert claude_plugin["name"] == codex_plugin["name"] == "agent-skillopt"
+    assert codex_plugin["skills"] == ["./skills/"]
+
+    assert "清单/CLI 契约" in compatibility
+    assert "未实际远程安装" in compatibility
+    assert "刷新或升级" in compatibility
+    assert "可变分支" in compatibility
+    assert "CLI 命令契约" in security
+    assert "实际远程安装" in security
+    assert "刷新或升级" in security
+    assert "可变分支" in security
+
+
 def test_docs_record_safe_host_boundaries_and_openclaw_status(project_root: Path):
     compatibility = (project_root / "docs" / "compatibility.md").read_text(encoding="utf-8")
     security = (project_root / "docs" / "security.md").read_text(encoding="utf-8")

@@ -17,9 +17,35 @@ Agent-SkillOpt 是中文优先的离线 Skill 创作器：一个可移植的 [Ag
 Code marketplace、Hermes Agent 便携包、OpenClaw 兼容包发现。创建和验证不会发起网络、读取
 secret、安装依赖或执行生成 Skill 的脚本。
 
-## 安全工作流
+## 远程 marketplace 快速安装（无需本地 clone）
 
-唯一流程是：自然语言 brief → stdin `preview` → 检查返回的目录、文件、token →
+若只需使用本项目随仓库分发的 `agent-skillopt` Skill，可直接让宿主从 GitHub marketplace
+获取；不需要本地 clone。本段命令会访问网络，并改变宿主的用户级 marketplace、缓存或已安装
+插件状态，执行前请审查来源并自行决定是否继续。
+
+**Claude Code 对话内 slash commands：**
+
+```text
+/plugin marketplace add naipi11/Agent-SkillOpt
+/plugin install agent-skillopt@agent-skillopt
+/reload-plugins
+```
+
+**Codex 终端 CLI：**
+
+```powershell
+codex plugin marketplace add naipi11/Agent-SkillOpt --ref main
+codex plugin add agent-skillopt@agent-skillopt
+```
+
+`main` 是可变分支，后续提交可能改变同一 ref 的内容。当前不声称存在可用 release；当有 release
+时，请使用其不可变 tag 或完整 commit SHA 代替 `main`（例如在 Codex 命令的 `--ref` 中），再执行
+显式的刷新或升级操作。安装后的脚手架实际执行时需要 Python 3.10+；仅完成 marketplace 获取并不
+等同于已经运行脚手架。
+
+## 本地生成 Skill 的安全工作流
+
+创建新的本地生成 Skill 包时，流程是：自然语言 brief → stdin `preview` → 检查返回的目录、文件、token →
 **一次明确确认** → 精确 `apply` → 离线 `validate` → 为所选宿主渲染 `install`。实际宿主执行
 是单独的外部状态变更，必须再次明确请求并提供与新安装计划匹配的 token。
 
