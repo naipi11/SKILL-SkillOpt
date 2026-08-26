@@ -25,16 +25,17 @@ network, read secrets, install dependencies, or execute generated Skill scripts.
 This section installs the released `agent-skillopt` plugin itself, not the
 `release-notes` bundle created in the example below. These commands access the
 network and change user-level marketplace, cache, plugin, or gateway state.
-Review `naipi11/Agent-SkillOpt` before running them. The verified local
-installation snapshot for released `v0.2.1`, CLI/manifest contract, unverified
-hosts, and recovery boundaries are recorded in the [compatibility matrix](docs/compatibility.md).
-They do not prove that the Skill scaffolder has run successfully in every
-project or host.
+Review `naipi11/Agent-SkillOpt` before running them. The current release is
+`v0.3.0`, published at commit
+`028e76a10d4c672936d65681c4f871323932d0f6`. The compatibility matrix records
+the previous `v0.2.1` host snapshot, the current release's offline evidence,
+unverified hosts, and recovery boundaries. None of these records prove that
+the Skill scaffolder has run successfully in every project or host.
 
 ### Codex
 
 ```powershell
-codex plugin marketplace add naipi11/Agent-SkillOpt --ref 9a3c9e1765a5ff0561af5221906879670f5c4536
+codex plugin marketplace add naipi11/Agent-SkillOpt --ref 028e76a10d4c672936d65681c4f871323932d0f6
 codex plugin add agent-skillopt@agent-skillopt
 ```
 
@@ -45,26 +46,27 @@ claude plugin marketplace add naipi11/Agent-SkillOpt --scope user
 claude plugin install agent-skillopt@agent-skillopt --scope user --yes
 ```
 
-The local `v0.2.1` plugin is installed and enabled in user scope. Claude Code
-reports that an install or update requires a restart before it is loaded, so
-installation metadata does not prove that the current session has loaded or run
-the Skill.
+The prior local `v0.2.1` plugin was installed and enabled in user scope.
+Claude Code reports that an install or update requires a restart before it is
+loaded. This release has not been separately host-installed in this evidence
+refresh, so installation metadata does not prove that the current session has
+loaded or run the Skill.
 
 ### Hermes Agent
 
-Hermes installations should be fixed to an exact 40-character commit SHA. The
-local `v0.2.1` installation used commit
-`9a3c9e1765a5ff0561af5221906879670f5c4536`, then inspected and enabled it:
+Hermes installations should be fixed to an exact 40-character commit SHA. For
+the current `v0.3.0` release, use commit
+`028e76a10d4c672936d65681c4f871323932d0f6`:
 
 ```powershell
-hermes plugins install naipi11/Agent-SkillOpt --ref 9a3c9e1765a5ff0561af5221906879670f5c4536 --no-enable
+hermes plugins install naipi11/Agent-SkillOpt --ref 028e76a10d4c672936d65681c4f871323932d0f6 --no-enable
 hermes plugins show agent-skillopt
 hermes plugins enable agent-skillopt
 ```
 
-This instance keeps `allow_tool_override: false` and takes effect in the next
-Hermes session. A successful installation does not prove that it has run in a
-new session.
+An instance that runs this sequence should keep `allow_tool_override: false`;
+the plugin takes effect in the next Hermes session. A successful installation
+does not prove that it has run in a new session.
 
 ### OpenClaw
 
@@ -89,7 +91,7 @@ record and verify the resolved 40-character commit SHA in release notes.
 According to the Claude Code plugin contract, Git marketplaces can refresh in
 the background according to their settings; remote fetching can occur after
 initial configuration even without a new explicit command. Explicit installs
-and updates also access the network and alter host state. The installation
+and updates also access the network and alter host state. The previous installation
 status snapshot completed on 2026-08-25 is in the [compatibility matrix](docs/compatibility.md);
 a single-machine result does not generalize to every version or host. Running
 the installed scaffolder requires Python 3.10+; obtaining a marketplace plugin

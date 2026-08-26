@@ -23,14 +23,15 @@ secret、安装依赖或执行生成 Skill 的脚本。
 
 本节安装的是此仓库已发布的 `agent-skillopt` 插件本身，而非下文示例中由它创建的
 `release-notes` bundle。以下命令会访问网络并改变对应宿主的用户级 marketplace、缓存、插件
-状态或网关；请先审查 `naipi11/Agent-SkillOpt`，再逐条执行。已发布 `v0.2.1` 的本机实际安装快照、
-CLI/清单契约、未验证宿主和恢复边界，均记录在[兼容性矩阵](docs/compatibility.md)；它们不等同于
-Skill 脚手架在任意项目或任意宿主中已经运行成功。
+状态或网关；请先审查 `naipi11/Agent-SkillOpt`，再逐条执行。当前发布版是 `v0.3.0`，合并提交为
+`028e76a10d4c672936d65681c4f871323932d0f6`。兼容性矩阵同时记录上一版 `v0.2.1` 的本机安装快照、
+当前版本的离线证据、未验证宿主和恢复边界；这些都不等同于 Skill 脚手架已在任意项目或任意宿主中
+运行成功。
 
 ### Codex
 
 ```powershell
-codex plugin marketplace add naipi11/Agent-SkillOpt --ref 9a3c9e1765a5ff0561af5221906879670f5c4536
+codex plugin marketplace add naipi11/Agent-SkillOpt --ref 028e76a10d4c672936d65681c4f871323932d0f6
 codex plugin add agent-skillopt@agent-skillopt
 ```
 
@@ -41,22 +42,22 @@ claude plugin marketplace add naipi11/Agent-SkillOpt --scope user
 claude plugin install agent-skillopt@agent-skillopt --scope user --yes
 ```
 
-本机的 `v0.2.1` 已在 user scope 安装并启用；Claude Code 报告安装/更新后需要重启才能加载，
-因此安装元数据不等同于当前会话已经加载或 Skill 已实际运行。
+上一轮本机的 `v0.2.1` 已在 user scope 安装并启用；Claude Code 报告安装/更新后需要重启才能加载。
+本轮没有单独执行 `v0.3.0` 的宿主安装，因此安装元数据不等同于当前会话已经加载或 Skill 已实际运行。
 
 ### Hermes Agent
 
-Hermes 的远程安装应固定到精确的 40 位 commit SHA。本机已用已发布 `v0.2.1` 的 commit
-`9a3c9e1765a5ff0561af5221906879670f5c4536` 完成安装、检查和启用：
+Hermes 的远程安装应固定到精确的 40 位 commit SHA。当前 `v0.3.0` 应使用
+`028e76a10d4c672936d65681c4f871323932d0f6`：
 
 ```powershell
-hermes plugins install naipi11/Agent-SkillOpt --ref 9a3c9e1765a5ff0561af5221906879670f5c4536 --no-enable
+hermes plugins install naipi11/Agent-SkillOpt --ref 028e76a10d4c672936d65681c4f871323932d0f6 --no-enable
 hermes plugins show agent-skillopt
 hermes plugins enable agent-skillopt
 ```
 
-该实例保持 `allow_tool_override: false`，并在下一次 Hermes session 生效；安装成功不等同于
-已在新 session 中实际运行。
+执行这组命令的 Hermes 实例应保持 `allow_tool_override: false`，并在下一次 Hermes session
+生效；安装成功不等同于已在新 session 中实际运行。
 
 ### OpenClaw
 
@@ -75,7 +76,7 @@ Claude 的远程 marketplace source 使用 branch/tag ref，不承诺能以 comm
 也只是 Git ref，不天然不可变：只能在受保护且受信任时使用，并应在 release notes 中记录、复核其
 解析出的 40 位 commit SHA，以审计并确认精确内容身份。依据 Claude Code 官方插件契约，Git
 marketplace 可能会按其设置在后台刷新；初始配置后，即使没有新的明确用户命令，也可能发生远程获取。
-显式安装或更新同样会访问网络并改变宿主状态。本机在 2026-08-25 完成的安装状态快照见
+显式安装或更新同样会访问网络并改变宿主状态。上一轮本机在 2026-08-25 完成的安装状态快照见
 [兼容性矩阵](docs/compatibility.md)，其中的单机结果不能泛化为所有版本或宿主。安装后的脚手架实际执行时需要 Python 3.10+；仅完成
 marketplace 获取并不等同于已经运行脚手架。
 
