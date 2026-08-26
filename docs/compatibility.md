@@ -1,7 +1,17 @@
 # 兼容性与本机证据
 
-0.2.1 以 [Agent Plugins v1](https://agent-plugins.org/specification) 为一个便携核心，并提供
+0.3.0 以 [Agent Plugins v1](https://agent-plugins.org/specification) 为一个便携核心，并提供
 Codex、Claude Code、Hermes Agent、OpenClaw 四个适配面。结构校验、安装元数据和实际运行是不同层级的证据。
+
+## v0.3.0 发布证据
+
+当前发布 tag 为 `v0.3.0`，解析到合并提交
+`028e76a10d4c672936d65681c4f871323932d0f6`。该版本的离线验证包含 213 项测试、
+Ruff、compileall、根包 `VALID`、wheel 内容检查和 shell 校验；新增的 `review` 与
+`evaluate` 均只做本地、非执行式检查。本轮没有把 v0.3.0 的宿主安装或 Skill 运行写成已验证事实。
+
+下表中 Codex、Claude Code 和 Hermes 的实际宿主安装快照来自上一版 `v0.2.1`，仅用于历史参考；
+OpenClaw 仍是未在本机安装验证的兼容目标。
 
 | 范围 | 实际命令/契约 | 本机证据（Windows，2026-08-25） | 状态 |
 | --- | --- | --- | --- |
@@ -33,7 +43,7 @@ SHA，作为精确内容身份的审计/验证事实。
 - Codex CLI 证据和权限边界见[官方插件说明](https://help.openai.com/en/articles/20001256-plugins-in-codex/)。
 - Claude 的 marketplace/清单语义见[插件参考](https://code.claude.com/docs/en/plugins-reference)。
 - Hermes 的便携包和 Git source 语义见其[插件文档](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)；本项目只接受明确的 `<owner>/<repository>` Git source。
-- OpenClaw 0.2.1 没有原生 `openclaw.plugin.json` 或 runtime code；兼容发现不是运行时承诺。
+- OpenClaw 0.3.0 没有原生 `openclaw.plugin.json` 或 runtime code；兼容发现不是运行时承诺。
 
 各宿主安装是多步骤、非原子的外部状态变更。失败后应先用 `codex plugin list`、`claude plugin list`
 或 `hermes plugins show <name>` 只读检查，再依据实际宿主状态按官方文档移除残留或补做缺失步骤；不得把

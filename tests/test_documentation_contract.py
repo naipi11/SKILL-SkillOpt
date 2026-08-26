@@ -71,7 +71,7 @@ def test_readme_does_not_reintroduce_retired_provider_or_credential_claims(proje
 
 
 def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(project_root: Path):
-    published_sha = "9a3c9e1765a5ff0561af5221906879670f5c4536"
+    published_sha = "028e76a10d4c672936d65681c4f871323932d0f6"
     english_readme = (project_root / "README.md").read_text(encoding="utf-8")
     chinese_readme = (project_root / "README.zh-CN.md").read_text(encoding="utf-8")
     compatibility = (project_root / "docs" / "compatibility.md").read_text(encoding="utf-8")
@@ -102,7 +102,7 @@ def test_remote_marketplace_quick_start_matches_the_host_manifest_contract(proje
         assert command in english_readme
         assert command in chinese_readme
     assert "Install the current Agent-SkillOpt plugin" in english_readme
-    assert "installation snapshot for released `v0.2.1`" in english_readme
+    assert "current release is" in english_readme
     assert "当前文档只验证了 CLI/清单契约" not in english_readme
     assert "Python 3.10+" in english_readme
     assert "`main` is mutable" in english_readme
