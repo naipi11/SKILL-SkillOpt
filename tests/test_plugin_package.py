@@ -19,7 +19,7 @@ def test_codex_and_claude_manifests_share_identity(project_root):
     claude = json.loads((project_root / ".claude-plugin" / "plugin.json").read_text())
 
     assert codex["name"] == claude["name"] == "agent-skillopt"
-    assert codex["version"] == claude["version"] == "0.2.1"
+    assert codex["version"] == claude["version"] == "0.3.0"
     assert codex["repository"] == claude["repository"]
     assert codex["license"] == claude["license"] == "MIT"
 

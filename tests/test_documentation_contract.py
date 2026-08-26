@@ -239,10 +239,10 @@ def test_docs_record_non_atomic_recovery_and_manifest_version_parity(project_roo
         root_manifest["version"]
         == codex_manifest["version"]
         == claude_manifest["version"]
-        == "0.2.1"
+        == "0.3.0"
     )
-    assert 'version = "0.2.1"' in pyproject
-    assert '__version__ = "0.2.1"' in package_init
+    assert 'version = "0.3.0"' in pyproject
+    assert '__version__ = "0.3.0"' in package_init
     assert "not atomic" in english_readme
     assert "40-character commit SHA" in english_readme
     assert "OpenClaw was not verified locally" in " ".join(english_readme.split())

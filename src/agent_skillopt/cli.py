@@ -213,7 +213,7 @@ def _install_handler(arguments: argparse.Namespace) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Build the 0.2.1 command parser."""
+    """Build the 0.3.0 command parser."""
     parser = argparse.ArgumentParser(
         prog="agent-skillopt",
         description="Agent-SkillOpt：跨宿主 Skill 创作工具。",

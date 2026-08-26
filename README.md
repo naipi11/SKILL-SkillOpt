@@ -112,7 +112,7 @@ output.
 
 `pyproject.toml`, `src/agent_skillopt/__init__.py`, `plugin.json`,
 `.codex-plugin/plugin.json`, and `.claude-plugin/plugin.json` currently all
-declare static version `0.2.1`. Any release that changes remote plugin content
+declare static version `0.3.0`. Any release that changes remote plugin content
 must increment all five versions together and record the resolved
 40-character commit SHA in release notes; otherwise installed hosts may treat
 the result as the same version and skip the update.

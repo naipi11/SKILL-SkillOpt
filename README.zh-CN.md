@@ -91,7 +91,7 @@ plugin 或重试缺失步骤；不要在未检查状态时重复整组命令。O
 ### 维护者发布规则
 
 `pyproject.toml`、`src/agent_skillopt/__init__.py`、`plugin.json`、`.codex-plugin/plugin.json` 和
-`.claude-plugin/plugin.json` 当前都声明静态版本 `0.2.1`。以后发布会改变远程插件内容的提交时，必须将
+`.claude-plugin/plugin.json` 当前都声明静态版本 `0.3.0`。以后发布会改变远程插件内容的提交时，必须将
 这五处版本同步递增并在发布说明中记录解析后的 40 位 commit SHA；否则已安装宿主可能继续把它视作同一版本而不更新。
 
 ## 本地生成 Skill 的安全工作流
