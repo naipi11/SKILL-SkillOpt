@@ -6,6 +6,18 @@
 都不读取凭据、不发起网络、不安装依赖，也不执行生成 Skill 的 script、hook 或 resource。
 规格、argv、token、文档、测试和日志都不得保存 secret。
 
+## 质量评分与安全审查
+
+每个由脚手架生成的包至少包含 `tests/cases/*.json`。`review` 会在正式结构验证后，
+只读扫描 Skill 正文、资源和案例，输出确定性的 `quality_score`、安全状态和发现项；
+它不执行 Skill、script、hook、模型或宿主命令。secret-like 值、指令覆盖、破坏性操作
+等高风险模式会阻断报告；shell、网络和环境变量访问等中风险模式要求人工复核。
+
+`evaluate` 只读取操作者或宿主另行收集的 `responses.json`，按案例中的
+`required_contains` / `forbidden_contains` 做文本评分。它不启动模型、不联网，也不把
+静态评分当作所有 Agent 宿主的运行效果证明。报告始终明确标记
+`executed: false` 和 `network_accessed: false`。
+
 创建 token 绑定规范化规格和输出目录。现有目标总是拒绝且不会覆盖用户文件；确认后先写入
 目标同级唯一 staging 目录、验证后再发布。异常只清理本次 staging；系统锁导致清理失败时，
 必须报告残留路径，不能删除目标或静默忽略。

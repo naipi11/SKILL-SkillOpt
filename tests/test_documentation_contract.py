@@ -167,6 +167,15 @@ def test_docs_record_safe_host_boundaries_and_openclaw_status(project_root: Path
         assert "未本机安装验证" in text
     for boundary in ("不读取凭据", "不发起网络", "不执行", "确认令牌"):
         assert boundary in security
+    for assessment_term in (
+        "tests/cases/*.json",
+        "quality_score",
+        "required_contains",
+        "forbidden_contains",
+        "executed: false",
+        "network_accessed: false",
+    ):
+        assert assessment_term in security
     assert "Hermes" in compatibility
     assert "Claude Code" in compatibility
 
@@ -230,10 +239,10 @@ def test_docs_record_non_atomic_recovery_and_manifest_version_parity(project_roo
         root_manifest["version"]
         == codex_manifest["version"]
         == claude_manifest["version"]
-        == "0.2.1"
+        == "0.3.0"
     )
-    assert 'version = "0.2.1"' in pyproject
-    assert '__version__ = "0.2.1"' in package_init
+    assert 'version = "0.3.0"' in pyproject
+    assert '__version__ = "0.3.0"' in package_init
     assert "not atomic" in english_readme
     assert "40-character commit SHA" in english_readme
     assert "OpenClaw was not verified locally" in " ".join(english_readme.split())
@@ -244,6 +253,25 @@ def test_docs_record_non_atomic_recovery_and_manifest_version_parity(project_roo
     assert "OpenClaw 未在本机验证" in chinese_documents[0]
     assert "OpenClaw 未本机安装" in chinese_documents[1]
     assert "OpenClaw 未本机安装验证" in chinese_documents[2]
+
+
+def test_docs_describe_skill_review_and_response_evaluation(project_root: Path):
+    english_readme = (project_root / "README.md").read_text(encoding="utf-8")
+    chinese_readme = (project_root / "README.zh-CN.md").read_text(encoding="utf-8")
+    skill = (project_root / "skills" / "agent-skillopt" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    for text in (english_readme, chinese_readme, skill):
+        assert "tests/cases" in text
+        assert "required_contains" in text
+        assert "forbidden_contains" in text
+        assert "review" in text
+        assert "evaluate" in text
+        assert "executed" in text
+        assert "network_accessed" in text
+    assert "quality_score" in english_readme
+    assert "质量" in chinese_readme
 
 
 def test_migration_retains_a_clear_legacy_pin_and_retired_docs_are_absent(project_root: Path):

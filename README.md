@@ -112,7 +112,7 @@ output.
 
 `pyproject.toml`, `src/agent_skillopt/__init__.py`, `plugin.json`,
 `.codex-plugin/plugin.json`, and `.claude-plugin/plugin.json` currently all
-declare static version `0.2.1`. Any release that changes remote plugin content
+declare static version `0.3.0`. Any release that changes remote plugin content
 must increment all five versions together and record the resolved
 40-character commit SHA in release notes; otherwise installed hosts may treat
 the result as the same version and skip the update.
@@ -160,6 +160,42 @@ unique sibling staging directory, then publishes without clobbering the target;
 on failure it cleans up its own staging directory and reports any residual
 directory blocked by a system lock. Do not install a bundle that fails
 validation.
+
+## Review and evaluate a generated Skill
+
+Every generated bundle includes at least one offline case under `tests/cases/`
+and instructions in `tests/README.md`. Add `test_cases` to the JSON spec when a
+Skill needs positive or negative assertions. A case contains a `prompt`,
+`required_contains`, and `forbidden_contains` list.
+
+Run the static quality and security review first:
+
+```powershell
+python "$skillDirectory\scripts\scaffold_bundle.py" review --path "$bundleRoot"
+```
+
+`review` produces a deterministic JSON report with `quality_score`, security
+status, findings, and explicit `executed: false` / `network_accessed: false`
+flags. It never executes the Skill, model, host, script, or hook. High-risk
+secret-like values, instruction overrides, destructive operations, and similar
+patterns block the report; medium-risk shell, network, or environment access
+patterns require human review.
+
+After a user or host has collected responses separately, save them as:
+
+```json
+{"responses": {"case-name": "response text"}}
+```
+
+Then score the responses without running a model or Skill:
+
+```powershell
+python "$skillDirectory\scripts\scaffold_bundle.py" evaluate `
+  --path "$bundleRoot" --responses responses.json
+```
+
+The evaluation score is a reproducible required/forbidden-text check, not a
+claim that every host or model will produce the same result.
 
 ## Render an installation plan only
 

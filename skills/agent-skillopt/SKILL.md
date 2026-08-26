@@ -17,6 +17,7 @@ description: Create review-gated portable Skill packages for coding agents.
 3. 关键约束与授权边界。
 4. 项目本地的目标目录。
 5. 有意义的离线验证方式。
+6. 至少一个离线测试案例；如果任务有明确的失败边界，再补一个 negative case。
 
 仅在有明确用途时加入 reference、script、asset 或测试资源；不要默认生成可选资源。
 依据 [portable-bundle-contract](references/portable-bundle-contract.md) 和
@@ -45,6 +46,37 @@ python <absolute-SKILL-directory>/scripts/scaffold_bundle.py validate --path <cr
 
 令牌缺失、过期、规格或目标目录改变时，重新预览。确定性脚手架不可用时，报告该限制；
 绝不能手写包文件作为替代方案。验证失败时不要安装。
+
+`test_cases` 可声明每个案例的 `prompt`、`required_contains` 和 `forbidden_contains`。
+如果没有声明，脚手架仍会生成一个明确标注的 `smoke-test`，但它没有断言，质量评分会提示
+需要补充有效案例。每个生成包还会带 `tests/README.md` 和 `tests/cases/*.json`。
+
+## 质量评分与安全审查
+
+包创建并通过 `validate` 后，先生成静态质量和安全报告：
+
+```text
+python <absolute-SKILL-directory>/scripts/scaffold_bundle.py review --path <created-bundle>
+```
+
+`review` 只读取已验证包，不执行 Skill、script、hook、model 或 network。它检查推荐的
+`When to use`、`Procedure`、`Output`、`Safety` 章节，测试案例完整性，以及 secret-like
+值、指令覆盖、shell、网络和破坏性操作模式。报告中的 `quality_score` 是可复现的静态
+评分，不是模型运行效果证明；报告会明确包含 `executed: false` 和
+`network_accessed: false`；高风险安全发现会阻断报告。
+
+如果用户或宿主已经在独立授权下收集了响应，把响应保存为 JSON 后再评分：
+
+```json
+{"responses": {"case-name": "response text"}}
+```
+
+```text
+python <absolute-SKILL-directory>/scripts/scaffold_bundle.py evaluate \
+  --path <created-bundle> --responses responses.json
+```
+
+`evaluate` 只对提供的文本做 required/forbidden 断言，不运行模型、宿主或生成 Skill。
 
 ## 仅渲染安装计划
 

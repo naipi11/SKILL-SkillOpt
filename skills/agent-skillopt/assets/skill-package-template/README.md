@@ -9,3 +9,9 @@
 ## 资源
 
 只列出该 Skill 实际使用的包内 resources；未使用时删除本节。
+
+## 测试案例与评估
+
+在 `tests/cases/` 中保存至少一个离线案例，并为每个案例声明 prompt、
+required_contains 和 forbidden_contains。先运行静态安全审查，再将单独收集的响应交给
+`agent-skillopt evaluate --path . --responses responses.json` 评分。

@@ -20,7 +20,7 @@ from agent_skillopt.errors import (
     StagingCleanupError,
     WriteConflictError,
 )
-from agent_skillopt.models import BundlePlan, PlannedFile, ResourceSpec, SkillSpec
+from agent_skillopt.models import BundlePlan, PlannedFile, ResourceSpec, SkillSpec, TestCaseSpec
 from agent_skillopt.validation import assert_valid_bundle
 
 _RESOURCE_DIRECTORIES = {"reference": "references", "script": "scripts", "asset": "assets"}
@@ -49,8 +49,15 @@ def build_plan(spec: SkillSpec) -> BundlePlan:
             _portable_validator_content(),
             "offline bundle validator",
         ),
+        PlannedFile(
+            PurePosixPath("tests/README.md"),
+            _evaluation_readme_content(spec),
+            "offline quality evaluation instructions",
+        ),
     ]
     files.extend(_resource_file(resource) for resource in spec.resources)
+    test_cases = spec.test_cases or (_default_test_case(),)
+    files.extend(_test_case_file(test_case) for test_case in test_cases)
     ordered_files = tuple(sorted(files, key=lambda file: file.relative_path.as_posix()))
     _assert_no_duplicate_paths(ordered_files)
     return BundlePlan(
@@ -268,6 +275,48 @@ def _resource_file(resource: ResourceSpec) -> PlannedFile:
     )
 
 
+def _default_test_case() -> TestCaseSpec:
+    return TestCaseSpec(
+        name="smoke-test",
+        prompt="Describe when to use this Skill and follow its documented procedure.",
+        required_contains=(),
+        forbidden_contains=(),
+    )
+
+
+def _test_case_file(test_case: TestCaseSpec) -> PlannedFile:
+    content = {
+        "forbidden_contains": list(test_case.forbidden_contains),
+        "name": test_case.name,
+        "prompt": test_case.prompt,
+        "required_contains": list(test_case.required_contains),
+    }
+    return _planned_json(
+        f"tests/cases/{test_case.name}.json", content, "offline Skill evaluation case"
+    )
+
+
+def _evaluation_readme_content(spec: SkillSpec) -> str:
+    cases = spec.test_cases or (_default_test_case(),)
+    case_names = "、".join(case.name for case in cases)
+    return (
+        "# Skill quality evaluation\n\n"
+        f"This package includes the offline cases: {case_names}.\n\n"
+        "First run the static quality and security review; it never executes this Skill:\n\n"
+        "```text\n"
+        "agent-skillopt review --path .\n"
+        "```\n\n"
+        "Collect responses separately, then save them as `responses.json` with this shape:\n\n"
+        "```json\n"
+        '{"responses": {"case-name": "response text"}}\n'
+        "```\n\n"
+        "Score the supplied responses without running a model, host, or Skill script:\n\n"
+        "```text\n"
+        "agent-skillopt evaluate --path . --responses responses.json\n"
+        "```\n"
+    )
+
+
 def _assert_no_duplicate_paths(files: tuple[PlannedFile, ...]) -> None:
     paths = [file.relative_path.as_posix() for file in files]
     if len(paths) != len(set(paths)):
@@ -284,6 +333,15 @@ def _confirmation_token(spec: SkillSpec) -> str:
             "resources": [
                 {"content": resource.content, "filename": resource.filename, "kind": resource.kind}
                 for resource in spec.resources
+            ],
+            "test_cases": [
+                {
+                    "forbidden_contains": list(test_case.forbidden_contains),
+                    "name": test_case.name,
+                    "prompt": test_case.prompt,
+                    "required_contains": list(test_case.required_contains),
+                }
+                for test_case in (spec.test_cases or (_default_test_case(),))
             ],
             "version": spec.version,
         },

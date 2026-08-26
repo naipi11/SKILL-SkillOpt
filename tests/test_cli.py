@@ -14,6 +14,8 @@ def test_help_exposes_the_skill_package_workflow(capsys):
     assert "preview" in output
     assert "apply" in output
     assert "validate" in output
+    assert "review" in output
+    assert "evaluate" in output
     assert "install" in output
     assert "Microsoft SkillOpt" not in output
 

@@ -19,7 +19,7 @@ def test_codex_and_claude_manifests_share_identity(project_root):
     claude = json.loads((project_root / ".claude-plugin" / "plugin.json").read_text())
 
     assert codex["name"] == claude["name"] == "agent-skillopt"
-    assert codex["version"] == claude["version"] == "0.2.1"
+    assert codex["version"] == claude["version"] == "0.3.0"
     assert codex["repository"] == claude["repository"]
     assert codex["license"] == claude["license"] == "MIT"
 
@@ -45,7 +45,8 @@ def test_scaffolder_wrapper_forwards_help_without_writing(project_root, tmp_path
     )
 
     assert result.returncode == 0
-    assert "preview" in result.stdout
+    for command in ("preview", "apply", "validate", "review", "evaluate", "install"):
+        assert command in result.stdout
     assert list(tmp_path.iterdir()) == []
 
 

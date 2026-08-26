@@ -91,7 +91,7 @@ plugin 或重试缺失步骤；不要在未检查状态时重复整组命令。O
 ### 维护者发布规则
 
 `pyproject.toml`、`src/agent_skillopt/__init__.py`、`plugin.json`、`.codex-plugin/plugin.json` 和
-`.claude-plugin/plugin.json` 当前都声明静态版本 `0.2.1`。以后发布会改变远程插件内容的提交时，必须将
+`.claude-plugin/plugin.json` 当前都声明静态版本 `0.3.0`。以后发布会改变远程插件内容的提交时，必须将
 这五处版本同步递增并在发布说明中记录解析后的 40 位 commit SHA；否则已安装宿主可能继续把它视作同一版本而不更新。
 
 ## 本地生成 Skill 的安全工作流
@@ -128,6 +128,38 @@ python "$skillDirectory\scripts\scaffold_bundle.py" validate --path "$bundleRoot
 
 `apply` 不覆盖现有目录。它在同级唯一 staging 目录写入并验证，随后才无覆盖发布；失败会清理
 自己的 staging（受系统锁阻止时会报告残留路径）。验证失败时不要安装。
+
+## 审查与评估生成的 Skill
+
+每个生成包至少包含一个 `tests/cases/` 下的离线案例，并带有
+`tests/README.md` 使用说明。若 Skill 有明确的正向或负向断言，可在 JSON 规格中加入
+`test_cases`；每个案例包含 `prompt`、`required_contains` 和 `forbidden_contains`。
+
+先运行静态质量与安全审查：
+
+```powershell
+python "$skillDirectory\scripts\scaffold_bundle.py" review --path "$bundleRoot"
+```
+
+`review` 输出确定性的 JSON 报告，包括 `quality_score`、安全状态、发现项以及明确的
+`executed: false` / `network_accessed: false` 标记。它不会执行 Skill、模型、宿主、脚本或 hook。
+类似 secret 的值、指令覆盖、破坏性操作等高风险模式会阻断报告；shell、网络或环境变量访问
+等中风险模式需要人工复核。
+
+如果用户或宿主已经在独立授权下收集了响应，将其保存为：
+
+```json
+{"responses": {"case-name": "response text"}}
+```
+
+随后在不运行模型或 Skill 的情况下评分：
+
+```powershell
+python "$skillDirectory\scripts\scaffold_bundle.py" evaluate `
+  --path "$bundleRoot" --responses responses.json
+```
+
+该评分是可复现的 required/forbidden 文本断言结果，不代表所有宿主或模型都会产生相同表现。
 
 ## 仅渲染安装计划
 
