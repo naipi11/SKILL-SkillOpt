@@ -136,6 +136,35 @@ def test_review_reports_invalid_bundle_without_reading_skill_content(tmp_path: P
     assert any(finding["code"] == "BUNDLE_INVALID" for finding in report["findings"])
 
 
+def test_review_blocks_a_malformed_evaluation_case(tmp_path: Path):
+    body = """## When to use
+
+Use this when a verified change needs release notes.
+
+## Procedure
+
+Collect the verified changes, then draft the notes.
+
+## Output format
+
+Return a concise release-notes document.
+
+## Safety boundaries
+
+Do not invent changes or modify project files.
+"""
+    bundle = _materialize(_quality_spec(tmp_path, body), tmp_path / "bundle")
+    case_path = bundle / "tests" / "cases" / "happy-path.json"
+    case = json.loads(case_path.read_text(encoding="utf-8"))
+    case["required_contains"] = "release notes"
+    case_path.write_text(json.dumps(case), encoding="utf-8")
+
+    report = review_bundle(bundle)
+
+    assert report["status"] == "blocked"
+    assert any(finding["code"] == "TEST_CASE_INVALID" for finding in report["findings"])
+
+
 def test_evaluate_scores_supplied_responses_without_running_the_skill(tmp_path: Path):
     body = """## When to use
 

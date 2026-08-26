@@ -118,7 +118,7 @@ def review_bundle(root: Path) -> dict[str, Any]:
     )
     security_status = _security_status(security_findings)
     findings = quality_findings + security_findings
-    if security_status == "blocked":
+    if any(finding["severity"] == "high" for finding in findings):
         status = "blocked"
     elif findings:
         status = "review"
