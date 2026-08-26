@@ -45,7 +45,8 @@ def test_scaffolder_wrapper_forwards_help_without_writing(project_root, tmp_path
     )
 
     assert result.returncode == 0
-    assert "preview" in result.stdout
+    for command in ("preview", "apply", "validate", "review", "evaluate", "install"):
+        assert command in result.stdout
     assert list(tmp_path.iterdir()) == []
 
 

@@ -16,9 +16,18 @@ _SEMANTIC_VERSION_PATTERN = re.compile(
     r"(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\Z"
 )
-_TOP_LEVEL_KEYS = {"name", "description", "body", "output_directory", "version", "resources"}
+_TOP_LEVEL_KEYS = {
+    "name",
+    "description",
+    "body",
+    "output_directory",
+    "version",
+    "resources",
+    "test_cases",
+}
 _RESOURCE_KEYS = {"kind", "filename", "content"}
 _RESOURCE_KINDS = {"reference", "script", "asset"}
+_TEST_CASE_KEYS = {"name", "prompt", "required_contains", "forbidden_contains"}
 
 HostName: TypeAlias = Literal["codex", "claude", "hermes", "openclaw"]
 
@@ -33,6 +42,16 @@ class ResourceSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class TestCaseSpec:
+    """One deterministic, response-based quality case for a portable Skill."""
+
+    name: str
+    prompt: str
+    required_contains: tuple[str, ...]
+    forbidden_contains: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SkillSpec:
     """Strict, user-provided data needed to render one portable Skill package."""
 
@@ -42,6 +61,7 @@ class SkillSpec:
     output_directory: Path
     version: str = "0.1.0"
     resources: tuple[ResourceSpec, ...] = ()
+    test_cases: tuple[TestCaseSpec, ...] = ()
 
     @classmethod
     def from_json(cls, text: str) -> SkillSpec:
@@ -75,6 +95,7 @@ class SkillSpec:
             raise SpecError("version 必须是有效的语义化版本。")
 
         resources = _parse_resources(data.get("resources", []))
+        test_cases = _parse_test_cases(data.get("test_cases", []))
         return cls(
             name=name,
             description=description,
@@ -82,6 +103,7 @@ class SkillSpec:
             output_directory=output_directory,
             version=version,
             resources=resources,
+            test_cases=test_cases,
         )
 
 
@@ -147,6 +169,44 @@ def _parse_resources(value: object) -> tuple[ResourceSpec, ...]:
     return tuple(
         sorted(resources, key=lambda resource: (resource.kind, resource.filename, resource.content))
     )
+
+
+def _parse_test_cases(value: object) -> tuple[TestCaseSpec, ...]:
+    if not isinstance(value, list):
+        raise SpecError("test_cases 必须是数组。")
+
+    cases: list[TestCaseSpec] = []
+    names: set[str] = set()
+    for case in value:
+        if not isinstance(case, dict) or set(case) != _TEST_CASE_KEYS:
+            raise SpecError(
+                "每个 test_case 必须包含 name、prompt、required_contains 和 forbidden_contains。"
+            )
+        name = normalize_skill_name(case["name"])
+        if name in names:
+            raise SpecError("test_cases 不能包含重复名称。")
+        names.add(name)
+        prompt = _required_text(case["prompt"], "test_case prompt")
+        required = _parse_assertions(case["required_contains"], "required_contains")
+        forbidden = _parse_assertions(case["forbidden_contains"], "forbidden_contains")
+        cases.append(
+            TestCaseSpec(
+                name=name,
+                prompt=prompt,
+                required_contains=required,
+                forbidden_contains=forbidden,
+            )
+        )
+
+    return tuple(sorted(cases, key=lambda case: case.name))
+
+
+def _parse_assertions(value: object, field: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise SpecError(f"{field} 必须是非空文本数组。")
+    return tuple(value)
 
 
 def _is_safe_resource_filename(value: str) -> bool:

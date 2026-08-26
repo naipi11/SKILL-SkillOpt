@@ -10,6 +10,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from agent_skillopt.assessment import evaluate_bundle, review_bundle
 from agent_skillopt.bundle import apply_plan, build_plan, render_preview
 from agent_skillopt.errors import (
     AgentSkillOptError,
@@ -114,6 +115,30 @@ def _validate_handler(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _review_handler(arguments: argparse.Namespace) -> int:
+    """Emit an offline quality and security report for one Skill package."""
+    try:
+        report = review_bundle(arguments.path)
+    except (OSError, UnicodeError, ValueError):
+        print("审查失败：Skill 包无法读取。", file=sys.stderr)
+        return 2
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return 1 if report["status"] == "blocked" else 0
+
+
+def _evaluate_handler(arguments: argparse.Namespace) -> int:
+    """Emit an offline response-based quality evaluation report."""
+    try:
+        report = evaluate_bundle(arguments.path, arguments.responses)
+    except (OSError, UnicodeError, ValueError):
+        print("评估失败：响应文件无效。", file=sys.stderr)
+        return 2
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    if report["status"] == "blocked":
+        return 1
+    return 1 if report["evaluation"]["failed"] else 0
+
+
 def _subprocess_runner(command: tuple[str, ...]) -> int:
     """Run one already-rendered argv tuple without invoking a shell."""
     return subprocess.run(command, shell=False, check=False).returncode
@@ -207,6 +232,15 @@ def _build_parser() -> argparse.ArgumentParser:
     validate = subcommands.add_parser("validate", help="离线验证一个四宿主 Skill 包。")
     validate.add_argument("--path", type=Path, required=True)
     validate.set_defaults(handler=_validate_handler)
+
+    review = subcommands.add_parser("review", help="离线生成 Skill 质量与安全审查报告。")
+    review.add_argument("--path", type=Path, required=True)
+    review.set_defaults(handler=_review_handler)
+
+    evaluate = subcommands.add_parser("evaluate", help="用离线响应案例生成 Skill 质量评分。")
+    evaluate.add_argument("--path", type=Path, required=True)
+    evaluate.add_argument("--responses", type=Path, required=True)
+    evaluate.set_defaults(handler=_evaluate_handler)
 
     install = subcommands.add_parser("install", help="渲染或显式执行宿主安装命令。")
     install.add_argument(
